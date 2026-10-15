@@ -154,9 +154,25 @@ exports.createInvoice = async (req, res, next) => {
       finalDueDate.setDate(finalDueDate.getDate() + 15);
     }
 
-    // Validate advance allocations if provided
+    // Validate advance allocations or direct advanceAmount if provided
     let totalAdvanceApplied = 0;
     const validatedAllocations = [];
+    const directAdvanceNum = round2(Number(req.body.advanceAmount || 0));
+
+    if (directAdvanceNum < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Advance amount cannot be negative'
+      });
+    }
+
+    if (directAdvanceNum > totals.grandTotal) {
+      return res.status(400).json({
+        success: false,
+        message: `Advance amount (₹${directAdvanceNum}) cannot exceed invoice total (₹${totals.grandTotal})`
+      });
+    }
+
     if (Array.isArray(advanceAllocations) && advanceAllocations.length > 0) {
       for (const alloc of advanceAllocations) {
         const allocAmt = round2(Number(alloc.amount));
@@ -187,6 +203,58 @@ exports.createInvoice = async (req, res, next) => {
           success: false,
           message: `Total advance applied (₹${totalAdvanceApplied}) cannot exceed invoice total (₹${totals.grandTotal})`
         });
+      }
+    } else if (directAdvanceNum > 0) {
+      // Automatic allocation from client's existing verified advances (FIFO)
+      let remainingToApply = directAdvanceNum;
+      const clientAdvances = await AdvancePayment.find({
+        client: client._id,
+        status: 'Verified',
+        unallocatedAmount: { $gt: 0 }
+      }).sort('paymentDate');
+
+      for (const adv of clientAdvances) {
+        if (remainingToApply <= 0) break;
+        const allocAmt = round2(Math.min(adv.unallocatedAmount, remainingToApply));
+        if (allocAmt > 0) {
+          validatedAllocations.push({ adv, allocAmt });
+          totalAdvanceApplied = round2(totalAdvanceApplied + allocAmt);
+          remainingToApply = round2(remainingToApply - allocAmt);
+        }
+      }
+
+      // If the client does not have enough existing advance to cover directAdvanceNum,
+      // create a formal AdvancePayment record for the remainder to ensure accounting integrity (real payment persistence)
+      if (remainingToApply > 0) {
+        const prefixAdv = companySettings.advancePrefix || 'ADV-2026-';
+        const seqAdv = await getNextSequence('advanceReceiptNumber');
+        const receiptNumberAdv = `${prefixAdv}${String(seqAdv).padStart(5, '0')}`;
+
+        const newAdv = await AdvancePayment.create({
+          receiptNumber: receiptNumberAdv,
+          client: client._id,
+          clientSnapshot: {
+            companyName: client.companyName,
+            contactPerson: client.contactPerson,
+            primaryPhone: client.primaryPhone,
+            email: client.email,
+            city: client.city,
+            state: client.state
+          },
+          paymentDate: invoiceDate || new Date(),
+          amount: remainingToApply,
+          allocatedAmount: 0,
+          unallocatedAmount: remainingToApply,
+          paymentMethod: req.body.advancePaymentMethod || 'Bank Transfer',
+          transactionReference: req.body.advanceTransactionReference || `DIRECT-ADV-${receiptNumberAdv}`,
+          notes: req.body.advanceNotes || `Advance recorded directly on Invoice Creation`,
+          status: 'Verified',
+          createdBy: req.user._id
+        });
+
+        validatedAllocations.push({ adv: newAdv, allocAmt: remainingToApply });
+        totalAdvanceApplied = round2(totalAdvanceApplied + remainingToApply);
+        remainingToApply = 0;
       }
     }
 
@@ -229,6 +297,7 @@ exports.createInvoice = async (req, res, next) => {
       totalTax: totals.totalTax,
       roundOffAdjustment: totals.roundOffAdjustment,
       grandTotal: totals.grandTotal,
+      advanceAmount: totalAdvanceApplied,
       amountPaid: initialPaid,
       creditAdjustment: 0,
       outstandingBalance: initialBalance,

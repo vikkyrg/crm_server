@@ -87,6 +87,31 @@ exports.createAdvance = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Client and a positive amount are required' });
     }
 
+    const selectedMethod = paymentMethod || 'Bank Transfer';
+    const trimmedRef = transactionReference ? String(transactionReference).trim() : '';
+
+    // Enforce reference for non-cash payment methods (Bank Transfer, NEFT/RTGS, UPI, Cheque)
+    if (['Bank Transfer', 'NEFT/RTGS', 'UPI', 'Cheque'].includes(selectedMethod) && !trimmedRef) {
+      return res.status(400).json({
+        success: false,
+        message: `Transaction reference / UTR / Cheque number is required for ${selectedMethod}`
+      });
+    }
+
+    // Prevent duplicate transaction references across active (non-reversed) advances
+    if (trimmedRef) {
+      const existingRef = await AdvancePayment.findOne({
+        transactionReference: { $regex: new RegExp(`^${trimmedRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        status: { $ne: 'Reversed' }
+      });
+      if (existingRef) {
+        return res.status(400).json({
+          success: false,
+          message: `An active advance payment (${existingRef.receiptNumber}) already exists with transaction reference '${trimmedRef}'`
+        });
+      }
+    }
+
     const client = await Client.findById(clientId);
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found' });
@@ -112,8 +137,8 @@ exports.createAdvance = async (req, res, next) => {
       amount: parsedAmount,
       allocatedAmount: 0,
       unallocatedAmount: parsedAmount,
-      paymentMethod: paymentMethod || 'Bank Transfer',
-      transactionReference,
+      paymentMethod: selectedMethod,
+      transactionReference: trimmedRef || undefined,
       bankDetails,
       associatedProject,
       notes,
@@ -259,6 +284,30 @@ exports.updateAdvance = async (req, res, next) => {
 
     const { amount, paymentDate, paymentMethod, transactionReference, bankDetails, associatedProject, notes } = req.body;
 
+    const newMethod = paymentMethod || advance.paymentMethod;
+    const newRef = transactionReference !== undefined ? String(transactionReference).trim() : (advance.transactionReference || '');
+
+    if (['Bank Transfer', 'NEFT/RTGS', 'UPI', 'Cheque'].includes(newMethod) && !newRef) {
+      return res.status(400).json({
+        success: false,
+        message: `Transaction reference / UTR / Cheque number is required for ${newMethod}`
+      });
+    }
+
+    if (newRef) {
+      const existingRef = await AdvancePayment.findOne({
+        _id: { $ne: advance._id },
+        transactionReference: { $regex: new RegExp(`^${newRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        status: { $ne: 'Reversed' }
+      });
+      if (existingRef) {
+        return res.status(400).json({
+          success: false,
+          message: `An active advance payment (${existingRef.receiptNumber}) already exists with transaction reference '${newRef}'`
+        });
+      }
+    }
+
     // If amount is being changed, ensure it's not less than already allocated amount
     if (amount !== undefined) {
       const parsedAmount = round2(Number(amount));
@@ -279,7 +328,7 @@ exports.updateAdvance = async (req, res, next) => {
 
     if (paymentDate) advance.paymentDate = paymentDate;
     if (paymentMethod) advance.paymentMethod = paymentMethod;
-    if (transactionReference !== undefined) advance.transactionReference = transactionReference;
+    if (transactionReference !== undefined) advance.transactionReference = newRef || undefined;
     if (bankDetails !== undefined) advance.bankDetails = bankDetails;
     if (associatedProject !== undefined) advance.associatedProject = associatedProject;
     if (notes !== undefined) advance.notes = notes;
