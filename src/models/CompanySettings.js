@@ -102,6 +102,18 @@ const companySettingsSchema = new mongoose.Schema(
       type: String,
       default: 'QTY-2026-'
     },
+    employeePrefix: {
+      type: String,
+      default: 'EMP-'
+    },
+    challanPrefix: {
+      type: String,
+      default: 'DC-2026-'
+    },
+    payrollPrefix: {
+      type: String,
+      default: 'PAY-2026-'
+    },
     defaultPaymentTerms: {
       type: String,
       default: 'Payment due within 15 days of invoice date. Late payments subject to 1.5% monthly interest.'

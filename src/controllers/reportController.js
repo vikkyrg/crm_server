@@ -192,6 +192,173 @@ exports.exportReportCSV = async (req, res, next) => {
         break;
       }
 
+      case 'employees': {
+        const Employee = require('../models/Employee');
+        const employees = await Employee.find({}).sort('employeeId');
+        const fields = [
+          { label: 'Employee ID', value: 'employeeId' },
+          { label: 'Full Name', value: 'fullName' },
+          { label: 'Email', value: 'email' },
+          { label: 'Phone', value: 'phone' },
+          { label: 'Department', value: 'department' },
+          { label: 'Designation', value: 'designation' },
+          { label: 'Employment Status', value: 'employmentStatus' },
+          { label: 'Employment Type', value: 'employmentType' },
+          { label: 'Joining Date', value: (r) => r.joiningDate ? new Date(r.joiningDate).toLocaleDateString('en-IN') : '' },
+          { label: 'Gross Monthly Salary', value: (r) => r.salaryStructure?.grossSalary || 0 },
+          { label: 'UAN', value: (r) => r.statutoryInfo?.uan || '' },
+          { label: 'PF Account No', value: (r) => r.statutoryInfo?.pfAccountNumber || '' }
+        ];
+        csvData = convertToCSV(employees, fields);
+        filename = `Innomatrics_Employees_Directory_${Date.now()}.csv`;
+        break;
+      }
+
+      case 'payroll': {
+        const PayrollRun = require('../models/PayrollRun');
+        const runs = await PayrollRun.find({}).sort({ year: -1, month: -1 });
+        const rows = [];
+        runs.forEach(run => {
+          (run.items || []).forEach(item => {
+            rows.push({
+              payrollCode: run.payrollCode,
+              periodName: run.periodName,
+              runStatus: run.status,
+              employeeId: item.employeeId,
+              employeeName: item.employeeName,
+              department: item.department,
+              designation: item.designation,
+              workingDays: item.totalWorkingDays,
+              paidDays: item.paidDays,
+              grossEarnings: item.grossEarnings,
+              employeePf: item.employeePfContribution,
+              professionalTax: item.professionalTax,
+              tds: item.tdsDeduction,
+              totalDeductions: item.totalEmployeeDeductions,
+              netSalaryPayable: item.netSalaryPayable,
+              employerPf: item.employerPfContribution,
+              employerCostTotal: item.employerCostTotal,
+              paymentStatus: item.paymentStatus,
+              paymentReference: item.paymentReference || ''
+            });
+          });
+        });
+        const fields = [
+          { label: 'Payroll Code', value: 'payrollCode' },
+          { label: 'Period', value: 'periodName' },
+          { label: 'Payroll Status', value: 'runStatus' },
+          { label: 'Employee ID', value: 'employeeId' },
+          { label: 'Employee Name', value: 'employeeName' },
+          { label: 'Department', value: 'department' },
+          { label: 'Designation', value: 'designation' },
+          { label: 'Working Days', value: 'workingDays' },
+          { label: 'Paid Days', value: 'paidDays' },
+          { label: 'Gross Earnings', value: 'grossEarnings' },
+          { label: 'Employee PF (12%)', value: 'employeePf' },
+          { label: 'Prof Tax', value: 'professionalTax' },
+          { label: 'TDS', value: 'tds' },
+          { label: 'Total Deductions', value: 'totalDeductions' },
+          { label: 'Net Take-Home', value: 'netSalaryPayable' },
+          { label: 'Employer PF (12%)', value: 'employerPf' },
+          { label: 'Employer CTC', value: 'employerCostTotal' },
+          { label: 'Payment Status', value: 'paymentStatus' },
+          { label: 'Payment Ref', value: 'paymentReference' }
+        ];
+        csvData = convertToCSV(rows, fields);
+        filename = `Innomatrics_Monthly_Payroll_Register_${Date.now()}.csv`;
+        break;
+      }
+
+      case 'employee-pf': {
+        const EmployeePfRecord = require('../models/EmployeePfRecord');
+        const pfRecords = await EmployeePfRecord.find({}).sort({ year: -1, month: -1 });
+        const fields = [
+          { label: 'Record Code', value: 'recordCode' },
+          { label: 'Period', value: 'periodName' },
+          { label: 'Employee ID', value: 'employeeId' },
+          { label: 'Employee Name', value: 'employeeName' },
+          { label: 'UAN', value: 'uan' },
+          { label: 'PF Account No', value: 'pfAccountNumber' },
+          { label: 'PF Wage Base (Rs)', value: 'pfWageBase' },
+          { label: 'Employee Share (12%)', value: 'employeeContribution' },
+          { label: 'Employer Share (12%)', value: 'employerContribution' },
+          { label: 'Total PF Pool', value: 'totalPfAmount' },
+          { label: 'Remittance Status', value: 'remittanceStatus' },
+          { label: 'Challan TRRN / Ref', value: 'challanNumber' },
+          { label: 'Remittance Date', value: (r) => r.remittanceDate ? new Date(r.remittanceDate).toLocaleDateString('en-IN') : '' }
+        ];
+        csvData = convertToCSV(pfRecords, fields);
+        filename = `Innomatrics_Employee_PF_Statutory_Register_${Date.now()}.csv`;
+        break;
+      }
+
+      case 'delivery-challans': {
+        const DeliveryChallan = require('../models/DeliveryChallan');
+        const challans = await DeliveryChallan.find({}).sort('-challanDate');
+        const rows = [];
+        challans.forEach(ch => {
+          (ch.items || []).forEach(itm => {
+            rows.push({
+              challanNumber: ch.challanNumber,
+              challanDate: new Date(ch.challanDate).toLocaleDateString('en-IN'),
+              client: ch.clientSnapshot?.companyName || '',
+              deliveryType: ch.deliveryType,
+              projectOrWorkOrder: ch.projectOrWorkOrder || '',
+              status: ch.status,
+              itemCode: itm.itemCode,
+              description: itm.description,
+              quantityDispatched: itm.quantityDispatched,
+              quantityDelivered: itm.quantityDelivered,
+              unit: itm.unit,
+              batchOrSerialNo: itm.batchOrSerialNo || '',
+              transporter: ch.transporterName || '',
+              vehicleNumber: ch.vehicleNumber || ''
+            });
+          });
+        });
+        const fields = [
+          { label: 'Challan Number', value: 'challanNumber' },
+          { label: 'Challan Date', value: 'challanDate' },
+          { label: 'Client', value: 'client' },
+          { label: 'Delivery Type', value: 'deliveryType' },
+          { label: 'Project / WO', value: 'projectOrWorkOrder' },
+          { label: 'Challan Status', value: 'status' },
+          { label: 'Item Code', value: 'itemCode' },
+          { label: 'Item Description', value: 'description' },
+          { label: 'Qty Dispatched', value: 'quantityDispatched' },
+          { label: 'Qty Delivered', value: 'quantityDelivered' },
+          { label: 'Unit', value: 'unit' },
+          { label: 'Batch / S.No', value: 'batchOrSerialNo' },
+          { label: 'Transporter', value: 'transporter' },
+          { label: 'Vehicle Number', value: 'vehicleNumber' }
+        ];
+        csvData = convertToCSV(rows, fields);
+        filename = `Innomatrics_Delivery_Challans_Register_${Date.now()}.csv`;
+        break;
+      }
+
+      case 'material-invoices': {
+        const Invoice = require('../models/Invoice');
+        const matInvoices = await Invoice.find({ invoiceType: 'Material' }).sort('-invoiceDate');
+        const fields = [
+          { label: 'Invoice Number', value: 'invoiceNumber' },
+          { label: 'Invoice Date', value: (r) => new Date(r.invoiceDate).toLocaleDateString('en-IN') },
+          { label: 'Due Date', value: (r) => new Date(r.dueDate).toLocaleDateString('en-IN') },
+          { label: 'Client', value: (r) => r.clientSnapshot?.companyName || '' },
+          { label: 'Project / WO', value: 'projectOrWorkOrder' },
+          { label: 'Linked Challans', value: (r) => (r.linkedChallanNumbers || []).join('; ') },
+          { label: 'Taxable Value', value: 'totalTaxableAmount' },
+          { label: 'Total Tax', value: 'totalTax' },
+          { label: 'Grand Total', value: 'grandTotal' },
+          { label: 'Amount Paid', value: 'amountPaid' },
+          { label: 'Outstanding Balance', value: 'outstandingBalance' },
+          { label: 'Status', value: 'status' }
+        ];
+        csvData = convertToCSV(matInvoices, fields);
+        filename = `Innomatrics_Material_Invoices_${Date.now()}.csv`;
+        break;
+      }
+
       default:
         return res.status(400).json({ success: false, message: 'Invalid report type' });
     }

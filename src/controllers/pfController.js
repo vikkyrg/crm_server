@@ -122,8 +122,17 @@ exports.createPFDocument = async (req, res, next) => {
 
     // Generate atomic sequential PF number
     const prefix = companySettings.pfPrefix || 'PF-2026-';
-    const seq = await getNextSequence('pfNumber');
-    const pfNumber = `${prefix}${String(seq).padStart(5, '0')}`;
+    let candidatePfNum = '';
+    let isUnique = false;
+    while (!isUnique) {
+      const seq = await getNextSequence('pfNumber');
+      candidatePfNum = `${prefix}${String(seq).padStart(5, '0')}`;
+      const exists = await PFDocument.findOne({ pfNumber: candidatePfNum });
+      if (!exists) {
+        isUnique = true;
+      }
+    }
+    const pfNumber = candidatePfNum;
 
     const newPF = await PFDocument.create({
       pfNumber,

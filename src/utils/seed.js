@@ -18,6 +18,11 @@ const seedData = async () => {
     console.log('[Seed] Connected to database');
 
     // Clean current database
+    const Employee = require('../models/Employee');
+    const PayrollRun = require('../models/PayrollRun');
+    const EmployeePfRecord = require('../models/EmployeePfRecord');
+    const DeliveryChallan = require('../models/DeliveryChallan');
+
     await Promise.all([
       User.deleteMany(),
       Service.deleteMany(),
@@ -26,7 +31,11 @@ const seedData = async () => {
       PFDocument.deleteMany(),
       Invoice.deleteMany(),
       AdvancePayment.deleteMany(),
-      QuantityRecord.deleteMany()
+      QuantityRecord.deleteMany(),
+      Employee.deleteMany(),
+      PayrollRun.deleteMany(),
+      EmployeePfRecord.deleteMany(),
+      DeliveryChallan.deleteMany()
     ]);
     console.log('[Seed] Cleared existing records');
 
@@ -60,7 +69,7 @@ const seedData = async () => {
       defaultNotes: 'Thank you for choosing Innomatrics as your technology partner!'
     });
 
-    // 2. Initial Users
+    // 2. Initial Administrator User (Single Master Admin)
     const adminUser = await User.create({
       name: 'Vikram Sharma',
       email: 'admin@innomatrics.com',
@@ -70,16 +79,7 @@ const seedData = async () => {
       phone: '+91 98111 22233'
     });
 
-    const financeUser = await User.create({
-      name: 'Pooja Agarwal',
-      email: 'finance@innomatrics.com',
-      password: 'FinancePass123!',
-      role: 'Finance',
-      employeeId: 'EMP-002',
-      phone: '+91 98222 33344'
-    });
-
-    console.log('[Seed] Created Administrator and Finance users');
+    console.log('[Seed] Created Administrator user');
 
     // 3. Services Catalog
     const services = await Service.insertMany([
@@ -155,8 +155,6 @@ const seedData = async () => {
       state: 'Uttar Pradesh',
       stateCode: '09',
       pincode: '201304',
-      assignedEmployee: adminUser._id,
-      assignedEmployeeName: adminUser.name,
       notes: 'Key healthcare client for EHR cloud migration',
       isActive: true
     });
@@ -174,8 +172,6 @@ const seedData = async () => {
       state: 'Karnataka',
       stateCode: '29',
       pincode: '560103',
-      assignedEmployee: financeUser._id,
-      assignedEmployeeName: financeUser.name,
       notes: 'Supply chain automation platform client',
       isActive: true
     });
@@ -193,8 +189,6 @@ const seedData = async () => {
       state: 'Maharashtra',
       stateCode: '27',
       pincode: '400051',
-      assignedEmployee: adminUser._id,
-      assignedEmployeeName: adminUser.name,
       notes: 'Payment gateway and algorithmic engine development',
       isActive: true
     });
@@ -424,14 +418,398 @@ const seedData = async () => {
       associatedProject: 'Algorithmic Risk Engine',
       notes: 'Retainer deposit for Phase 1 architecture scoping',
       status: 'Verified',
-      createdBy: financeUser._id
+      createdBy: adminUser._id
     });
     console.log('[Seed] Created Advance Payment');
 
+    // 9. Employees
+    const emp1 = await Employee.create({
+      employeeId: 'EMP-001',
+      firstName: 'Vikram',
+      lastName: 'Sharma',
+      fullName: 'Vikram Sharma',
+      email: 'vikram.sharma@innomatrics.com',
+      phone: '+91 98111 22233',
+      department: 'Engineering',
+      designation: 'Principal Solutions Architect',
+      joiningDate: new Date('2024-01-15'),
+      employmentStatus: 'Active',
+      employmentType: 'Full-time',
+      currentAddress: 'Sector 62, Noida, Uttar Pradesh',
+      permanentAddress: 'Dehradun, Uttarakhand',
+      emergencyContact: {
+        name: 'Sunita Sharma',
+        relationship: 'Spouse',
+        phone: '+91 98111 22299'
+      },
+      bankDetails: {
+        bankName: 'HDFC Bank',
+        accountNumber: '50100234567890',
+        ifscCode: 'HDFC0001890',
+        branch: 'Sector 62 Noida',
+        accountHolderName: 'Vikram Sharma'
+      },
+      statutoryInfo: {
+        panNumber: 'ABCPS1234F',
+        aadhaarNumber: '1234-5678-9012',
+        uan: '101234567890',
+        pfAccountNumber: 'UP/NOI/0012345/000/0000101',
+        isPfEligible: true,
+        pfWageLimitApplicable: false
+      },
+      salaryStructure: {
+        basicSalary: 65000,
+        hra: 26000,
+        conveyanceAllowance: 5000,
+        specialAllowance: 14000,
+        medicalAllowance: 5000,
+        grossSalary: 115000,
+        employeePfRate: 12,
+        employerPfRate: 12,
+        professionalTax: 200,
+        tdsEstimate: 8500
+      }
+    });
+
+    const emp2 = await Employee.create({
+      employeeId: 'EMP-002',
+      firstName: 'Pooja',
+      lastName: 'Agarwal',
+      fullName: 'Pooja Agarwal',
+      email: 'pooja.agarwal@innomatrics.com',
+      phone: '+91 98222 33344',
+      department: 'Finance',
+      designation: 'Finance & Compliance Manager',
+      joiningDate: new Date('2024-03-01'),
+      employmentStatus: 'Active',
+      employmentType: 'Full-time',
+      currentAddress: 'Indirapuram, Ghaziabad, UP',
+      bankDetails: {
+        bankName: 'ICICI Bank',
+        accountNumber: '002101567891',
+        ifscCode: 'ICIC0000021',
+        branch: 'Sector 18 Noida',
+        accountHolderName: 'Pooja Agarwal'
+      },
+      statutoryInfo: {
+        panNumber: 'BKLPA9876C',
+        uan: '109876543210',
+        pfAccountNumber: 'UP/NOI/0012345/000/0000102',
+        isPfEligible: true,
+        pfWageLimitApplicable: false
+      },
+      salaryStructure: {
+        basicSalary: 45000,
+        hra: 18000,
+        conveyanceAllowance: 3000,
+        specialAllowance: 10000,
+        medicalAllowance: 4000,
+        grossSalary: 80000,
+        employeePfRate: 12,
+        employerPfRate: 12,
+        professionalTax: 200,
+        tdsEstimate: 4200
+      }
+    });
+
+    const emp3 = await Employee.create({
+      employeeId: 'EMP-003',
+      firstName: 'Rahul',
+      lastName: 'Mehta',
+      fullName: 'Rahul Mehta',
+      email: 'rahul.mehta@innomatrics.com',
+      phone: '+91 97111 88990',
+      department: 'Logistics & Supply',
+      designation: 'Operations & Site Dispatch Officer',
+      joiningDate: new Date('2024-06-10'),
+      employmentStatus: 'Active',
+      employmentType: 'Full-time',
+      currentAddress: 'Greater Noida West, UP',
+      bankDetails: {
+        bankName: 'Axis Bank',
+        accountNumber: '918010045678912',
+        ifscCode: 'UTIB0000189',
+        branch: 'Knowledge Park Greater Noida',
+        accountHolderName: 'Rahul Mehta'
+      },
+      statutoryInfo: {
+        panNumber: 'CJQPM4567E',
+        uan: '104567890123',
+        pfAccountNumber: 'UP/NOI/0012345/000/0000103',
+        isPfEligible: true,
+        pfWageLimitApplicable: false
+      },
+      salaryStructure: {
+        basicSalary: 28000,
+        hra: 11200,
+        conveyanceAllowance: 2500,
+        specialAllowance: 5000,
+        medicalAllowance: 2300,
+        grossSalary: 49000,
+        employeePfRate: 12,
+        employerPfRate: 12,
+        professionalTax: 200,
+        tdsEstimate: 1200
+      }
+    });
+    console.log('[Seed] Created Employees');
+
+    // 10. Delivery Challan
+    const challan1 = await DeliveryChallan.create({
+      challanNumber: 'DC-2026-00001',
+      challanDate: new Date(Date.now() - 4 * 86400000),
+      client: client1._id,
+      clientSnapshot: {
+        companyName: client1.companyName,
+        contactPerson: client1.contactPerson,
+        primaryPhone: client1.primaryPhone,
+        email: client1.email,
+        billingAddress: client1.billingAddress,
+        shippingAddress: client1.billingAddress,
+        city: client1.city,
+        state: client1.state,
+        stateCode: client1.stateCode,
+        pincode: client1.pincode,
+        gstin: client1.gstin
+      },
+      deliveryAddress: 'Sector 127 Project Site, Noida, UP',
+      deliveryType: 'Material Supply',
+      projectOrWorkOrder: 'Apex Hospital IoT Telemetry Deployment',
+      items: [
+        {
+          itemCode: 'MAT-SRV-01',
+          description: 'Enterprise Gateway IoT Sensors & Connectivity Hubs',
+          quantityDispatched: 10,
+          quantityDelivered: 10,
+          quantityInvoiced: 10,
+          unit: 'Units',
+          batchOrSerialNo: 'BAT-2026-904',
+          unitPriceEstimate: 4500
+        },
+        {
+          itemCode: 'MAT-RACK-02',
+          description: 'Industrial 42U Wall Mount Rack Enclosures with PDUs',
+          quantityDispatched: 2,
+          quantityDelivered: 2,
+          quantityInvoiced: 2,
+          unit: 'Units',
+          batchOrSerialNo: 'RCK-8812',
+          unitPriceEstimate: 22000
+        }
+      ],
+      transporterName: 'BlueDart Logistics',
+      vehicleNumber: 'UP 16 BT 9921',
+      driverName: 'Ramesh Singh',
+      driverPhone: '+91 99100 44332',
+      dispatchDate: new Date(Date.now() - 4 * 86400000),
+      status: 'Delivered',
+      actualDeliveryDate: new Date(Date.now() - 3 * 86400000),
+      receivedBy: {
+        name: 'Suresh Kumar',
+        phone: '+91 98765 11299',
+        designation: 'Site Operations Lead',
+        receivedAt: new Date(Date.now() - 3 * 86400000),
+        remarks: 'All 12 hardware packages received in pristine condition'
+      },
+      createdBy: adminUser._id
+    });
+    console.log('[Seed] Created Delivery Challan');
+
+    // 11. Material Invoice (linked to Challan)
+    const matItems = [
+      {
+        serviceId: 'MAT-SRV-01',
+        description: 'Enterprise Gateway IoT Sensors & Connectivity Hubs',
+        unit: 'Units',
+        unitPrice: 4500,
+        quantity: 10,
+        discountPercent: 0,
+        taxRate: 18
+      },
+      {
+        serviceId: 'MAT-RACK-02',
+        description: 'Industrial 42U Wall Mount Rack Enclosures with PDUs',
+        unit: 'Units',
+        unitPrice: 22000,
+        quantity: 2,
+        discountPercent: 0,
+        taxRate: 18
+      }
+    ];
+
+    const matTotals = calculateDocumentTotals(matItems, 0, false, true); // Intra-state (UP)
+    const matInvoice = await Invoice.create({
+      invoiceNumber: 'INV-2026-00003',
+      invoiceDate: new Date(Date.now() - 2 * 86400000),
+      dueDate: new Date(Date.now() + 13 * 86400000),
+      client: client1._id,
+      clientSnapshot: {
+        companyName: client1.companyName,
+        contactPerson: client1.contactPerson,
+        primaryPhone: client1.primaryPhone,
+        email: client1.email,
+        gstin: client1.gstin,
+        pan: client1.pan,
+        billingAddress: client1.billingAddress,
+        city: client1.city,
+        state: client1.state,
+        stateCode: client1.stateCode,
+        pincode: client1.pincode
+      },
+      invoiceType: 'Material',
+      projectOrWorkOrder: challan1.projectOrWorkOrder,
+      linkedChallans: [challan1._id],
+      linkedChallanNumbers: [challan1.challanNumber],
+      items: matTotals.items,
+      documentDiscount: 0,
+      subtotal: matTotals.subtotal,
+      totalTaxableAmount: matTotals.totalTaxableAmount,
+      cgstTotal: matTotals.cgstTotal,
+      sgstTotal: matTotals.sgstTotal,
+      igstTotal: matTotals.igstTotal,
+      totalTax: matTotals.totalTax,
+      roundOffAdjustment: matTotals.roundOffAdjustment,
+      grandTotal: matTotals.grandTotal,
+      amountPaid: 0,
+      creditAdjustment: 0,
+      outstandingBalance: matTotals.grandTotal,
+      status: 'Issued',
+      paymentTerms: settings.defaultPaymentTerms,
+      notes: `Material delivery bill against Challan ${challan1.challanNumber}`,
+      createdBy: adminUser._id
+    });
+
+    challan1.invoices.push(matInvoice._id);
+    challan1.status = 'Invoiced';
+    await challan1.save();
+    console.log('[Seed] Created Material Invoice linked to Challan');
+
+    // 12. Payroll Run & Statutory PF Records
+    const payrollEmployees = [emp1, emp2, emp3];
+    const payrollItems = payrollEmployees.map(emp => {
+      const basic = emp.salaryStructure.basicSalary;
+      const gross = emp.salaryStructure.grossSalary;
+      const empPf = Math.round(basic * 0.12);
+      const emplyrPf = Math.round(basic * 0.12);
+      const pt = emp.salaryStructure.professionalTax;
+      const tds = emp.salaryStructure.tdsEstimate;
+      const totalDeductions = empPf + pt + tds;
+      const netPayable = gross - totalDeductions;
+
+      return {
+        employee: emp._id,
+        employeeId: emp.employeeId,
+        employeeName: emp.fullName,
+        department: emp.department,
+        designation: emp.designation,
+        panNumber: emp.statutoryInfo.panNumber,
+        bankAccount: emp.bankDetails.accountNumber,
+        bankName: emp.bankDetails.bankName,
+        ifscCode: emp.bankDetails.ifscCode,
+        uan: emp.statutoryInfo.uan,
+        pfAccountNumber: emp.statutoryInfo.pfAccountNumber,
+        totalWorkingDays: 30,
+        paidDays: 30,
+        basicSalary: basic,
+        hra: emp.salaryStructure.hra,
+        conveyanceAllowance: emp.salaryStructure.conveyanceAllowance,
+        specialAllowance: emp.salaryStructure.specialAllowance,
+        medicalAllowance: emp.salaryStructure.medicalAllowance,
+        otherAllowances: 0,
+        bonusOrIncentive: 0,
+        overtimeAmount: 0,
+        grossEarnings: gross,
+        pfWageBase: basic,
+        employeePfContribution: empPf,
+        professionalTax: pt,
+        tdsDeduction: tds,
+        otherDeductions: 0,
+        totalEmployeeDeductions: totalDeductions,
+        netSalaryPayable: netPayable,
+        employerPfContribution: emplyrPf,
+        employerCostTotal: gross + emplyrPf,
+        paymentStatus: 'Paid',
+        paymentDate: new Date('2026-10-02'),
+        paymentMethod: 'Bank Transfer',
+        paymentReference: `HDFC-SAL-2026-09-${emp.employeeId}`
+      };
+    });
+
+    const totalGross = payrollItems.reduce((acc, i) => acc + i.grossEarnings, 0);
+    const totalEmpPf = payrollItems.reduce((acc, i) => acc + i.employeePfContribution, 0);
+    const totalEmplyrPf = payrollItems.reduce((acc, i) => acc + i.employerPfContribution, 0);
+    const totalDeds = payrollItems.reduce((acc, i) => acc + i.totalEmployeeDeductions, 0);
+    const totalNet = payrollItems.reduce((acc, i) => acc + i.netSalaryPayable, 0);
+
+    const prevMonthRun = await PayrollRun.create({
+      payrollCode: 'PAY-2026-0001',
+      month: 9,
+      year: 2026,
+      periodName: 'September 2026',
+      items: payrollItems,
+      totalEmployees: 3,
+      totalGrossEarnings: totalGross,
+      totalEmployeePf: totalEmpPf,
+      totalEmployerPf: totalEmplyrPf,
+      totalPfContribution: totalEmpPf + totalEmplyrPf,
+      totalProfessionalTax: 600,
+      totalTdsDeductions: 13900,
+      totalDeductions: totalDeds,
+      totalNetPayable: totalNet,
+      totalEmployerCost: totalGross + totalEmplyrPf,
+      totalAmountPaid: totalNet,
+      totalPendingAmount: 0,
+      status: 'Finalized',
+      finalizedAt: new Date('2026-10-01'),
+      finalizedBy: adminUser._id,
+      remarks: 'September 2026 salaries disbursed on schedule',
+      createdBy: adminUser._id
+    });
+
+    // Statutory PF Records for September 2026
+    for (const itm of payrollItems) {
+      await EmployeePfRecord.create({
+        recordCode: `PF-2026-09-${itm.employeeId}`,
+        employee: itm.employee,
+        employeeId: itm.employeeId,
+        employeeName: itm.employeeName,
+        uan: itm.uan,
+        pfAccountNumber: itm.pfAccountNumber,
+        payrollRun: prevMonthRun._id,
+        month: 9,
+        year: 2026,
+        periodName: 'September 2026',
+        pfWageBase: itm.pfWageBase,
+        employeeContribution: itm.employeePfContribution,
+        employerContribution: itm.employerPfContribution,
+        totalPfAmount: itm.employeePfContribution + itm.employerPfContribution,
+        remittanceStatus: 'Remitted',
+        challanNumber: 'TRRN-881239045',
+        remittanceDate: new Date('2026-10-10'),
+        bankReference: 'HDFC-EPFO-991204',
+        remarks: 'EPFO September 2026 ECR remittance complete'
+      });
+    }
+
+    console.log('[Seed] Created September 2026 Finalized Payroll & EPFO Remittance Records');
+
+    // 13. Synchronize Sequence Counters
+    const { Counter } = require('../models/Counter');
+    await Promise.all([
+      Counter.findByIdAndUpdate('clientId', { seq: 3 }, { upsert: true }),
+      Counter.findByIdAndUpdate('serviceId', { seq: 5 }, { upsert: true }),
+      Counter.findByIdAndUpdate('pfNumber', { seq: 2 }, { upsert: true }),
+      Counter.findByIdAndUpdate('invoiceNumber', { seq: 3 }, { upsert: true }),
+      Counter.findByIdAndUpdate('advanceReceiptNumber', { seq: 1 }, { upsert: true }),
+      Counter.findByIdAndUpdate('quantityRecordId', { seq: 3 }, { upsert: true }),
+      Counter.findByIdAndUpdate('employeeId', { seq: 3 }, { upsert: true }),
+      Counter.findByIdAndUpdate('deliveryChallanNumber', { seq: 1 }, { upsert: true })
+    ]);
+    console.log('[Seed] Synchronized all Sequence Counters');
+
     console.log('\n=============================================');
     console.log('SEED DATA INITIALIZATION COMPLETE');
-    console.log('Admin Account: admin@innomatrics.com / AdminPassword123!');
-    console.log('Finance Account: finance@innomatrics.com / FinancePass123!');
+    console.log('Master Admin Account: admin@innomatrics.com / AdminPassword123!');
     console.log('=============================================\n');
 
     process.exit(0);

@@ -159,11 +159,25 @@ const deriveStateCode = (gstin, state) => {
 exports.createClient = async (req, res, next) => {
   try {
     let clientId = req.body.clientId;
-    if (!clientId) {
+    if (!clientId || clientId.trim() === '') {
       const settings = await CompanySettings.findOne();
       const prefix = settings?.clientPrefix || 'INN-CL-';
-      const seq = await getNextSequence('clientId');
-      clientId = `${prefix}${String(seq).padStart(5, '0')}`;
+      let candidateId = '';
+      let isUnique = false;
+      while (!isUnique) {
+        const seq = await getNextSequence('clientId');
+        candidateId = `${prefix}${String(seq).padStart(5, '0')}`;
+        const exists = await Client.findOne({ clientId: candidateId });
+        if (!exists) {
+          isUnique = true;
+        }
+      }
+      clientId = candidateId;
+    } else {
+      const exists = await Client.findOne({ clientId: clientId.trim() });
+      if (exists) {
+        return res.status(400).json({ success: false, message: `Client ID "${clientId}" already exists. Please choose a different ID or leave blank to auto-generate.` });
+      }
     }
 
     const clientData = { ...req.body };

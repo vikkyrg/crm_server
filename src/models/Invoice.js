@@ -163,6 +163,23 @@ const invoiceSchema = new mongoose.Schema(
       ref: 'PFDocument'
     },
     relatedPFNumber: String,
+    invoiceType: {
+      type: String,
+      enum: ['Service', 'Material'],
+      default: 'Service',
+      index: true
+    },
+    projectOrWorkOrder: {
+      type: String,
+      trim: true
+    },
+    linkedChallans: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'DeliveryChallan'
+      }
+    ],
+    linkedChallanNumbers: [String],
     items: [invoiceItemSchema],
     documentDiscount: {
       type: Number,

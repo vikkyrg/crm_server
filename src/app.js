@@ -15,6 +15,10 @@ const quantityRoutes = require('./routes/quantityRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const settingsRoutes = require('./routes/settingsRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const employeeRoutes = require('./routes/employeeRoutes');
+const payrollRoutes = require('./routes/payrollRoutes');
+const employeePfRoutes = require('./routes/employeePfRoutes');
+const deliveryChallanRoutes = require('./routes/deliveryChallanRoutes');
 
 const app = express();
 
@@ -52,6 +56,10 @@ app.use('/api/quantities', quantityRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/employees', employeeRoutes);
+app.use('/api/payroll', payrollRoutes);
+app.use('/api/employee-pf', employeePfRoutes);
+app.use('/api/delivery-challans', deliveryChallanRoutes);
 
 // Central Error Handler
 app.use(errorHandler);

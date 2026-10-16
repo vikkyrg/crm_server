@@ -119,8 +119,17 @@ exports.createAdvance = async (req, res, next) => {
 
     const companySettings = await CompanySettings.findOne() || {};
     const prefix = companySettings.advancePrefix || 'ADV-2026-';
-    const seq = await getNextSequence('advanceReceiptNumber');
-    const receiptNumber = `${prefix}${String(seq).padStart(5, '0')}`;
+    let candidateReceiptNum = '';
+    let isUnique = false;
+    while (!isUnique) {
+      const seq = await getNextSequence('advanceReceiptNumber');
+      candidateReceiptNum = `${prefix}${String(seq).padStart(5, '0')}`;
+      const exists = await AdvancePayment.findOne({ receiptNumber: candidateReceiptNum });
+      if (!exists) {
+        isUnique = true;
+      }
+    }
+    const receiptNumber = candidateReceiptNum;
 
     const advance = await AdvancePayment.create({
       receiptNumber,

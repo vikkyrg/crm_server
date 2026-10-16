@@ -3,6 +3,10 @@ const Service = require('../models/Service');
 const PFDocument = require('../models/PFDocument');
 const Invoice = require('../models/Invoice');
 const AdvancePayment = require('../models/AdvancePayment');
+const Employee = require('../models/Employee');
+const PayrollRun = require('../models/PayrollRun');
+const EmployeePfRecord = require('../models/EmployeePfRecord');
+const DeliveryChallan = require('../models/DeliveryChallan');
 const { round2 } = require('../utils/financials');
 
 // @desc    Get dashboard metrics, KPIs, monthly trends, and recent records
@@ -12,24 +16,34 @@ exports.getDashboardMetrics = async (req, res, next) => {
   try {
     const now = new Date();
     const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
 
     // Aggregations
     const [
       totalClients,
       activeClients,
       totalServices,
+      totalEmployees,
+      activeEmployees,
       pfStats,
       invoiceStats,
+      materialInvoiceStats,
       overdueStats,
       advanceStats,
+      challanStats,
+      pfRemittanceStats,
+      latestPayroll,
       recentPFs,
       recentInvoices,
       recentAdvances,
-      recentClients
+      recentClients,
+      recentChallans
     ] = await Promise.all([
       Client.countDocuments(),
       Client.countDocuments({ isActive: true }),
       Service.countDocuments(),
+      Employee.countDocuments(),
+      Employee.countDocuments({ employmentStatus: 'Active' }),
 
       // PF Stats
       PFDocument.aggregate([
@@ -42,7 +56,7 @@ exports.getDashboardMetrics = async (req, res, next) => {
         }
       ]),
 
-      // Invoice Stats (Total Invoiced, Amount Paid, Outstanding)
+      // All Invoice Stats
       Invoice.aggregate([
         {
           $match: { status: { $ne: 'Cancelled' } }
@@ -53,6 +67,21 @@ exports.getDashboardMetrics = async (req, res, next) => {
             count: { $sum: 1 },
             totalInvoiced: { $sum: '$grandTotal' },
             totalPaid: { $sum: '$amountPaid' },
+            totalOutstanding: { $sum: '$outstandingBalance' }
+          }
+        }
+      ]),
+
+      // Material Invoices specific
+      Invoice.aggregate([
+        {
+          $match: { invoiceType: 'Material', status: { $ne: 'Cancelled' } }
+        },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalInvoiced: { $sum: '$grandTotal' },
             totalOutstanding: { $sum: '$outstandingBalance' }
           }
         }
@@ -76,7 +105,7 @@ exports.getDashboardMetrics = async (req, res, next) => {
         }
       ]),
 
-      // Advance Payment Stats (Received, Allocated, Unallocated)
+      // Advance Payment Stats
       AdvancePayment.aggregate([
         {
           $match: { status: { $ne: 'Reversed' } }
@@ -92,11 +121,38 @@ exports.getDashboardMetrics = async (req, res, next) => {
         }
       ]),
 
+      // Delivery Challans stats
+      DeliveryChallan.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]),
+
+      // Employee PF Remittance stats
+      EmployeePfRecord.aggregate([
+        {
+          $group: {
+            _id: '$remittanceStatus',
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$totalPfAmount' },
+            employeeShare: { $sum: '$employeeContribution' },
+            employerShare: { $sum: '$employerContribution' }
+          }
+        }
+      ]),
+
+      // Latest Payroll Run
+      PayrollRun.findOne({ status: 'Finalized' }).sort({ year: -1, month: -1 }),
+
       // Recent Records
       PFDocument.find().sort('-createdAt').limit(5).select('pfNumber documentDate clientSnapshot grandTotal status'),
-      Invoice.find().sort('-createdAt').limit(5).select('invoiceNumber invoiceDate clientSnapshot grandTotal amountPaid outstandingBalance status'),
+      Invoice.find().sort('-createdAt').limit(5).select('invoiceNumber invoiceType invoiceDate clientSnapshot grandTotal amountPaid outstandingBalance status'),
       AdvancePayment.find().sort('-createdAt').limit(5).select('receiptNumber paymentDate clientSnapshot amount unallocatedAmount paymentMethod status'),
-      Client.find().sort('-createdAt').limit(5).select('clientId companyName contactPerson primaryPhone email isActive')
+      Client.find().sort('-createdAt').limit(5).select('clientId companyName contactPerson primaryPhone email isActive'),
+      DeliveryChallan.find().sort('-createdAt').limit(5).select('challanNumber challanDate clientSnapshot projectOrWorkOrder status items')
     ]);
 
     // Monthly Trends for past 6 months
@@ -190,12 +246,28 @@ exports.getDashboardMetrics = async (req, res, next) => {
 
     const monthlyTrends = Object.values(trendMap);
 
+    // Challan summary by status
+    const challanStatusMap = {};
+    challanStats.forEach(c => { challanStatusMap[c._id] = c.count; });
+
+    // PF Remittance summary
+    let pfPendingRemittanceAmount = 0;
+    let pfPendingCount = 0;
+    pfRemittanceStats.forEach(p => {
+      if (p._id === 'Pending') {
+        pfPendingRemittanceAmount = round2(p.totalAmount);
+        pfPendingCount = p.count;
+      }
+    });
+
     res.status(200).json({
       success: true,
       kpis: {
         totalClients,
         activeClients,
         totalServices,
+        totalEmployees,
+        activeEmployees,
         pfCount: pfStats[0]?.count || 0,
         totalPFValue: round2(pfStats[0]?.totalValue || 0),
         invoiceCount: invoiceStats[0]?.count || 0,
@@ -206,14 +278,31 @@ exports.getDashboardMetrics = async (req, res, next) => {
         totalUnallocatedAdvances: round2(advanceStats[0]?.totalUnallocated || 0),
         outstandingBalance: round2(invoiceStats[0]?.totalOutstanding || 0),
         overdueCount: overdueStats[0]?.count || 0,
-        overdueAmount: round2(overdueStats[0]?.totalOverdue || 0)
+        overdueAmount: round2(overdueStats[0]?.totalOverdue || 0),
+
+        // ERP specific metrics
+        materialInvoiceCount: materialInvoiceStats[0]?.count || 0,
+        materialInvoicedAmount: round2(materialInvoiceStats[0]?.totalInvoiced || 0),
+        materialOutstandingBalance: round2(materialInvoiceStats[0]?.totalOutstanding || 0),
+
+        challansIssued: (challanStatusMap['Issued'] || 0) + (challanStatusMap['Dispatched'] || 0),
+        challansDelivered: challanStatusMap['Delivered'] || 0,
+        challansTotal: challanStats.reduce((acc, c) => acc + c.count, 0),
+
+        latestPayrollPeriod: latestPayroll?.periodName || 'None',
+        latestPayrollNetPayable: latestPayroll ? latestPayroll.totalNetPayable : 0,
+        latestPayrollPending: latestPayroll ? latestPayroll.totalPendingAmount : 0,
+
+        pfPendingRemittanceAmount,
+        pfPendingCount
       },
       monthlyTrends,
       invoicesByStatus,
       recentPFs,
       recentInvoices,
       recentAdvances,
-      recentClients
+      recentClients,
+      recentChallans
     });
   } catch (error) {
     next(error);

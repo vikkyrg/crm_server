@@ -32,6 +32,10 @@ exports.getInvoices = async (req, res, next) => {
       query.status = status;
     }
 
+    if (req.query.invoiceType) {
+      query.invoiceType = req.query.invoiceType;
+    }
+
     if (overdueOnly === 'true') {
       query.dueDate = { $lt: new Date() };
       query.outstandingBalance = { $gt: 0 };
@@ -101,7 +105,11 @@ exports.createInvoice = async (req, res, next) => {
       notes,
       paymentTerms,
       relatedPFDocument,
-      advanceAllocations // Optional array of { advanceId, amount } to apply at creation
+      advanceAllocations, // Optional array of { advanceId, amount } to apply at creation
+      invoiceType,
+      projectOrWorkOrder,
+      linkedChallans,
+      linkedChallanNumbers
     } = req.body;
 
     if (!clientId) {
@@ -144,8 +152,17 @@ exports.createInvoice = async (req, res, next) => {
 
     // Generate atomic sequential invoice number
     const prefix = companySettings.invoicePrefix || 'INV-2026-';
-    const seq = await getNextSequence('invoiceNumber');
-    const invoiceNumber = `${prefix}${String(seq).padStart(5, '0')}`;
+    let candidateInvoiceNum = '';
+    let isUnique = false;
+    while (!isUnique) {
+      const seq = await getNextSequence('invoiceNumber');
+      candidateInvoiceNum = `${prefix}${String(seq).padStart(5, '0')}`;
+      const exists = await Invoice.findOne({ invoiceNumber: candidateInvoiceNum });
+      if (!exists) {
+        isUnique = true;
+      }
+    }
+    const invoiceNumber = candidateInvoiceNum;
 
     // Due date fallback
     let finalDueDate = dueDate;
@@ -287,6 +304,10 @@ exports.createInvoice = async (req, res, next) => {
       },
       relatedPFDocument: pfDoc ? pfDoc._id : (relatedPFDocument || null),
       relatedPFNumber: pfDoc ? pfDoc.pfNumber : null,
+      invoiceType: invoiceType || 'Service',
+      projectOrWorkOrder: projectOrWorkOrder || '',
+      linkedChallans: linkedChallans || [],
+      linkedChallanNumbers: linkedChallanNumbers || [],
       items: totals.items,
       documentDiscount: totals.documentDiscount,
       subtotal: totals.subtotal,
@@ -306,6 +327,17 @@ exports.createInvoice = async (req, res, next) => {
       notes: notes || companySettings.defaultNotes,
       createdBy: req.user._id
     });
+
+    // If linked to Delivery Challan(s), update Challan linkage and status
+    if (linkedChallans && Array.isArray(linkedChallans) && linkedChallans.length > 0) {
+      const DeliveryChallan = require('../models/DeliveryChallan');
+      for (const chId of linkedChallans) {
+        await DeliveryChallan.findByIdAndUpdate(chId, {
+          $addToSet: { invoices: invoice._id },
+          status: 'Invoiced'
+        });
+      }
+    }
 
     // Process advance records and persist allocations
     for (const { adv, allocAmt } of validatedAllocations) {
@@ -569,7 +601,23 @@ exports.deleteInvoice = async (req, res, next) => {
       }
     }
 
-    // 4. Delete invoice record safely
+    // 4. Safeguard: If invoice is linked to Delivery Challan(s), unlink and update their status
+    if (invoice.linkedChallans && invoice.linkedChallans.length > 0) {
+      const DeliveryChallan = require('../models/DeliveryChallan');
+      for (const chId of invoice.linkedChallans) {
+        const challan = await DeliveryChallan.findById(chId);
+        if (challan) {
+          challan.invoices = challan.invoices.filter(invId => invId.toString() !== invoice._id.toString());
+          if (challan.invoices.length === 0) {
+            // Restore status based on delivery progress
+            challan.status = challan.actualDeliveryDate || challan.receivedBy?.name ? 'Delivered' : 'Issued';
+          }
+          await challan.save();
+        }
+      }
+    }
+
+    // 5. Delete invoice record safely
     await Invoice.findByIdAndDelete(invoice._id);
 
     res.status(200).json({

@@ -112,8 +112,17 @@ exports.createQuantity = async (req, res, next) => {
 
     const companySettings = await CompanySettings.findOne() || {};
     const prefix = companySettings.quantityPrefix || 'QTY-2026-';
-    const seq = await getNextSequence('quantityRecordId');
-    const recordId = `${prefix}${String(seq).padStart(5, '0')}`;
+    let candidateRecordId = '';
+    let isUnique = false;
+    while (!isUnique) {
+      const seq = await getNextSequence('quantityRecordId');
+      candidateRecordId = `${prefix}${String(seq).padStart(5, '0')}`;
+      const exists = await QuantityRecord.findOne({ recordId: candidateRecordId });
+      if (!exists) {
+        isUnique = true;
+      }
+    }
+    const recordId = candidateRecordId;
 
     const record = await QuantityRecord.create({
       recordId,

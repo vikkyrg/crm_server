@@ -21,12 +21,12 @@ router.route('/')
 
 router.route('/:id')
   .get(getAdvance)
-  .put(authorize('Administrator', 'Finance'), updateAdvance)
-  .delete(authorize('Administrator', 'Finance'), deleteAdvance);
+  .put(authorize('Administrator'), updateAdvance)
+  .delete(authorize('Administrator'), deleteAdvance);
 
 router.post('/:id/allocate', allocateAdvance);
-router.post('/:id/deallocate', authorize('Administrator', 'Finance'), deallocateAdvance);
-router.post('/:id/reverse', authorize('Administrator', 'Finance'), reverseAdvance);
+router.post('/:id/deallocate', authorize('Administrator'), deallocateAdvance);
+router.post('/:id/reverse', authorize('Administrator'), reverseAdvance);
 router.get('/:id/pdf', downloadAdvanceReceiptPDF);
 
 module.exports = router;
