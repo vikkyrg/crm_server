@@ -13,5 +13,6 @@ router.use(authorize('Administrator'));
 router.get('/', getPfRecords);
 router.put('/:id/remit', updatePfRemittance);
 router.post('/batch-remit', batchRemitPfPeriod);
+router.post('/remit-period', batchRemitPfPeriod);
 
 module.exports = router;

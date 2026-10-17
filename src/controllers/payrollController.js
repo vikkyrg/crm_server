@@ -49,16 +49,20 @@ const calculateEmployeePayrollItem = (employee, daysConfig = {}) => {
   let employerPfContribution = 0;
 
   if (stat.isPfEligible !== false) {
-    const empRate = Number(s.employeePfRate) !== undefined ? Number(s.employeePfRate) : 12;
-    const emplyrRate = Number(s.employerPfRate) !== undefined ? Number(s.employerPfRate) : 12;
+    const empRate = Number.isFinite(Number(s.employeePfRate)) ? Number(s.employeePfRate) : 12;
+    const emplyrRate = Number.isFinite(Number(s.employerPfRate)) ? Number(s.employerPfRate) : 12;
 
     employeePfContribution = round2((pfWageBase * empRate) / 100);
     employerPfContribution = round2((pfWageBase * emplyrRate) / 100);
   }
 
   const professionalTax = Number(s.professionalTax) || 0;
-  const tdsDeduction = Number(daysConfig.tdsDeduction) !== undefined ? Number(daysConfig.tdsDeduction) : (Number(s.tdsEstimate) || 0);
-  const otherDeductions = Number(daysConfig.otherDeductions) || 0;
+  const tdsDeduction = Number.isFinite(Number(daysConfig.tdsDeduction))
+    ? Number(daysConfig.tdsDeduction)
+    : (Number(s.tdsEstimate) || 0);
+  const otherDeductions = Number.isFinite(Number(daysConfig.otherDeductions))
+    ? Number(daysConfig.otherDeductions)
+    : 0;
 
   const totalEmployeeDeductions = round2(employeePfContribution + professionalTax + tdsDeduction + otherDeductions);
   const netSalaryPayable = round2(grossEarnings - totalEmployeeDeductions);
@@ -151,17 +155,27 @@ exports.getPayrollRun = async (req, res, next) => {
   }
 };
 
+const parseMonthNumber = (m) => {
+  if (typeof m === 'number' && m >= 1 && m <= 12) return m;
+  if (!m) return null;
+  const num = Number(m);
+  if (!isNaN(num) && num >= 1 && num <= 12) return num;
+  const clean = String(m).trim().toLowerCase();
+  const idx = MONTH_NAMES.findIndex(name => name && name.toLowerCase() === clean);
+  return idx > 0 ? idx : null;
+};
+
 // @desc    Preview or Initialize Monthly Payroll Run
 // @route   POST /api/payroll/preview
 // @access  Private (Administrator, Finance)
 exports.previewMonthlyPayroll = async (req, res, next) => {
   try {
     const { month, year } = req.body;
-    const numMonth = Number(month);
+    const numMonth = parseMonthNumber(month);
     const numYear = Number(year);
 
     if (!numMonth || !numYear || numMonth < 1 || numMonth > 12) {
-      return res.status(400).json({ success: false, message: 'Valid month (1-12) and year are required' });
+      return res.status(400).json({ success: false, message: 'Valid month (1-12 or month name) and year are required' });
     }
 
     // Check if payroll is already finalized for this month/year
@@ -212,16 +226,16 @@ exports.previewMonthlyPayroll = async (req, res, next) => {
 };
 
 // @desc    Save or Finalize Payroll Run
-// @route   POST /api/payroll/save
+// @route   POST /api/payroll/save or POST /api/payroll
 // @access  Private (Administrator, Finance)
 exports.savePayrollRun = async (req, res, next) => {
   try {
     const { month, year, items, status = 'Draft', remarks } = req.body;
-    const numMonth = Number(month);
+    const numMonth = parseMonthNumber(month);
     const numYear = Number(year);
 
     if (!numMonth || !numYear || !items || !items.length) {
-      return res.status(400).json({ success: false, message: 'Month, year, and payroll items are required' });
+      return res.status(400).json({ success: false, message: 'Valid month, year, and payroll items are required' });
     }
 
     // Check existing
@@ -330,7 +344,7 @@ exports.savePayrollRun = async (req, res, next) => {
 // @access  Private (Administrator, Finance)
 exports.recordSalaryPayment = async (req, res, next) => {
   try {
-    const { paymentDate, paymentMethod, paymentReference, remarks } = req.body;
+    const { paymentDate, paymentMethod, paymentReference, transactionReference, remarks } = req.body;
     const run = await PayrollRun.findById(req.params.id);
     if (!run) {
       return res.status(404).json({ success: false, message: 'Payroll run not found' });
@@ -344,7 +358,7 @@ exports.recordSalaryPayment = async (req, res, next) => {
     item.paymentStatus = 'Paid';
     item.paymentDate = paymentDate || new Date();
     item.paymentMethod = paymentMethod || 'Bank Transfer';
-    item.paymentReference = paymentReference || '';
+    item.paymentReference = paymentReference || transactionReference || '';
     item.remarks = remarks || item.remarks;
 
     // Recalculate totals

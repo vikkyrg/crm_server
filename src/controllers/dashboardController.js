@@ -296,6 +296,23 @@ exports.getDashboardMetrics = async (req, res, next) => {
         pfPendingRemittanceAmount,
         pfPendingCount
       },
+      totalEmployees,
+      activeEmployees,
+      challanStats: {
+        totalIssued: (challanStatusMap['Issued'] || 0) + (challanStatusMap['Dispatched'] || 0),
+        totalDelivered: challanStatusMap['Delivered'] || 0,
+        total: challanStats.reduce((acc, c) => acc + c.count, 0)
+      },
+      pfRemittanceStats: {
+        pendingCount: pfPendingCount,
+        pendingAmount: pfPendingRemittanceAmount
+      },
+      latestPayroll,
+      materialInvoiceStats: {
+        count: materialInvoiceStats[0]?.count || 0,
+        invoicedAmount: round2(materialInvoiceStats[0]?.totalInvoiced || 0),
+        outstandingBalance: round2(materialInvoiceStats[0]?.totalOutstanding || 0)
+      },
       monthlyTrends,
       invoicesByStatus,
       recentPFs,

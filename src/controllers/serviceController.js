@@ -148,3 +148,45 @@ exports.toggleServiceStatus = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Delete service with safeguards
+// @route   DELETE /api/services/:id
+// @access  Private (Administrator)
+exports.deleteService = async (req, res, next) => {
+  try {
+    const service = await Service.findById(req.params.id);
+    if (!service) {
+      return res.status(404).json({ success: false, message: 'Service not found' });
+    }
+
+    const Invoice = require('../models/Invoice');
+    const PFDocument = require('../models/PFDocument');
+    const QuantityRecord = require('../models/QuantityRecord');
+
+    const [invoicesCount, pfCount, quantityCount] = await Promise.all([
+      Invoice.countDocuments({
+        $or: [{ 'items.service': service._id }, { 'items.serviceId': service.serviceId }]
+      }),
+      PFDocument.countDocuments({
+        $or: [{ 'items.service': service._id }, { 'items.serviceId': service.serviceId }]
+      }),
+      QuantityRecord.countDocuments({ service: service._id })
+    ]);
+
+    if (invoicesCount > 0 || pfCount > 0 || quantityCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete service "${service.name}". It is referenced in ${invoicesCount} invoice(s), ${pfCount} PF document(s), and ${quantityCount} quantity record(s). Please deactivate/archive the service instead.`
+      });
+    }
+
+    await Service.findByIdAndDelete(req.params.id);
+
+    res.status(200).json({
+      success: true,
+      message: `Service "${service.name}" deleted successfully.`
+    });
+  } catch (error) {
+    next(error);
+  }
+};

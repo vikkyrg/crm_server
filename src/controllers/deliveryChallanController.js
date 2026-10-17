@@ -209,7 +209,7 @@ exports.updateChallan = async (req, res, next) => {
 // @access  Private
 exports.updateDeliveryStatus = async (req, res, next) => {
   try {
-    const { status, actualDeliveryDate, receivedBy, itemsDelivered } = req.body;
+    const { status, actualDeliveryDate, receivedBy, itemsDelivered, receiverName, receiverPhone, receiverDesignation, remarks, deliveryNotes } = req.body;
     const challan = await DeliveryChallan.findById(req.params.id);
     if (!challan) {
       return res.status(404).json({ success: false, message: 'Challan not found' });
@@ -217,13 +217,19 @@ exports.updateDeliveryStatus = async (req, res, next) => {
 
     if (status) challan.status = status;
     if (actualDeliveryDate) challan.actualDeliveryDate = actualDeliveryDate;
-    if (receivedBy) {
+
+    const rName = (receivedBy && receivedBy.name) || receiverName;
+    const rPhone = (receivedBy && receivedBy.phone) || receiverPhone;
+    const rDesig = (receivedBy && receivedBy.designation) || receiverDesignation;
+    const rRemarks = (receivedBy && receivedBy.remarks) || remarks || deliveryNotes;
+
+    if (rName || rPhone || rDesig || rRemarks) {
       challan.receivedBy = {
-        name: receivedBy.name,
-        phone: receivedBy.phone,
-        designation: receivedBy.designation,
-        receivedAt: receivedBy.receivedAt || new Date(),
-        remarks: receivedBy.remarks
+        name: rName || challan.receivedBy?.name || '',
+        phone: rPhone || challan.receivedBy?.phone || '',
+        designation: rDesig || challan.receivedBy?.designation || '',
+        receivedAt: (receivedBy && receivedBy.receivedAt) || challan.receivedBy?.receivedAt || new Date(),
+        remarks: rRemarks || challan.receivedBy?.remarks || ''
       };
     }
 
@@ -279,6 +285,34 @@ exports.cancelChallan = async (req, res, next) => {
       success: true,
       data: challan,
       message: `Delivery Challan ${challan.challanNumber} has been marked as Cancelled`
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Permanently delete delivery challan safely
+// @route   DELETE /api/delivery-challans/:id
+// @access  Private
+exports.deleteChallan = async (req, res, next) => {
+  try {
+    const challan = await DeliveryChallan.findById(req.params.id);
+    if (!challan) {
+      return res.status(404).json({ success: false, message: 'Challan not found' });
+    }
+
+    if (challan.invoices && challan.invoices.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete Challan ${challan.challanNumber}. Material Invoices have already been generated against it.`
+      });
+    }
+
+    await DeliveryChallan.findByIdAndDelete(req.params.id);
+
+    res.status(200).json({
+      success: true,
+      message: `Delivery Challan ${challan.challanNumber} has been deleted successfully.`
     });
   } catch (error) {
     next(error);

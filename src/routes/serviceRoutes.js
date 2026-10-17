@@ -5,9 +5,10 @@ const {
   getService,
   createService,
   updateService,
+  deleteService,
   toggleServiceStatus
 } = require('../controllers/serviceController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 
 router.use(protect);
 
@@ -17,7 +18,8 @@ router.route('/')
 
 router.route('/:id')
   .get(getService)
-  .put(updateService);
+  .put(updateService)
+  .delete(authorize('Administrator'), deleteService);
 
 router.patch('/:id/toggle-status', toggleServiceStatus);
 

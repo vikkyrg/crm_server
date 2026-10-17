@@ -7,6 +7,7 @@ const {
   updateChallan,
   updateDeliveryStatus,
   cancelChallan,
+  deleteChallan,
   downloadChallanPDF
 } = require('../controllers/deliveryChallanController');
 const { protect } = require('../middleware/auth');
@@ -19,9 +20,12 @@ router.route('/')
 
 router.route('/:id')
   .get(getChallan)
-  .put(updateChallan);
+  .put(updateChallan)
+  .delete(deleteChallan);
 
 router.patch('/:id/delivery-status', updateDeliveryStatus);
+router.put('/:id/delivery-status', updateDeliveryStatus);
+router.put('/:id/status', updateDeliveryStatus);
 router.patch('/:id/cancel', cancelChallan);
 router.get('/:id/pdf', downloadChallanPDF);
 

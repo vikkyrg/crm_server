@@ -7,11 +7,23 @@ const { round2 } = require('../utils/financials');
 // @access  Private (Administrator, Finance)
 exports.getPfRecords = async (req, res, next) => {
   try {
-    const { month, year, employeeId, status, search, page = 1, limit = 50, sort = '-year -month' } = req.query;
+    const { month, year, periodMonth, periodYear, employeeId, status, search, page = 1, limit = 50, sort = '-year -month' } = req.query;
     const query = {};
 
-    if (month) query.month = Number(month);
-    if (year) query.year = Number(year);
+    const rawMonth = month !== undefined ? month : periodMonth;
+    const rawYear = year !== undefined ? year : periodYear;
+
+    if (rawMonth) {
+      let mNum = Number(rawMonth);
+      if (isNaN(mNum)) {
+        const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+        const idx = monthNames.indexOf(String(rawMonth).toLowerCase());
+        if (idx !== -1) mNum = idx + 1;
+      }
+      if (mNum) query.month = mNum;
+    }
+
+    if (rawYear) query.year = Number(rawYear);
     if (status) query.remittanceStatus = status;
 
     if (employeeId) {
@@ -58,7 +70,9 @@ exports.getPfRecords = async (req, res, next) => {
     res.status(200).json({
       success: true,
       total,
+      totalCount: total,
       page: Number(page),
+      currentPage: Number(page),
       totalPages: Math.ceil(total / limit),
       summary: stats[0] || {
         totalWageBase: 0,
@@ -68,7 +82,8 @@ exports.getPfRecords = async (req, res, next) => {
         pendingCount: 0,
         remittedCount: 0
       },
-      data: records
+      data: records,
+      records
     });
   } catch (error) {
     next(error);
@@ -110,27 +125,43 @@ exports.updatePfRemittance = async (req, res, next) => {
 // @access  Private (Administrator, Finance)
 exports.batchRemitPfPeriod = async (req, res, next) => {
   try {
-    const { month, year, challanNumber, remittanceDate, bankReference, remarks } = req.body;
+    const { month, year, periodMonth, periodYear, challanNumber, challanTrrn, remittanceDate, bankReference, remarks, notes } = req.body;
 
-    if (!month || !year || !challanNumber) {
+    const rawMonth = month !== undefined ? month : periodMonth;
+    const finalYear = Number(year || periodYear);
+    const finalChallan = challanNumber || challanTrrn;
+    const finalRemarks = remarks || notes;
+
+    if (!rawMonth || !finalYear || !finalChallan) {
       return res.status(400).json({ success: false, message: 'Month, year, and challan reference number are required' });
     }
 
+    let monthNum = Number(rawMonth);
+    if (isNaN(monthNum)) {
+      const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+      const idx = monthNames.indexOf(String(rawMonth).toLowerCase());
+      monthNum = idx !== -1 ? idx + 1 : null;
+    }
+
+    if (!monthNum || monthNum < 1 || monthNum > 12) {
+      return res.status(400).json({ success: false, message: 'Valid month (1-12 or month name) is required' });
+    }
+
     const result = await EmployeePfRecord.updateMany(
-      { month: Number(month), year: Number(year), remittanceStatus: { $ne: 'Reversed' } },
+      { month: monthNum, year: finalYear, remittanceStatus: { $ne: 'Reversed' } },
       {
         remittanceStatus: 'Remitted',
-        challanNumber,
+        challanNumber: finalChallan,
         remittanceDate: remittanceDate || new Date(),
         bankReference,
-        remarks: remarks || `Batch remitted under Challan ${challanNumber}`
+        remarks: finalRemarks || `Batch remitted under Challan ${finalChallan}`
       }
     );
 
     res.status(200).json({
       success: true,
       modifiedCount: result.modifiedCount,
-      message: `Successfully marked ${result.modifiedCount} employee PF records as Remitted under Challan ${challanNumber}`
+      message: `Successfully marked ${result.modifiedCount} employee PF records as Remitted under Challan ${finalChallan}`
     });
   } catch (error) {
     next(error);

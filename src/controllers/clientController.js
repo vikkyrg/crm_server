@@ -3,6 +3,7 @@ const PFDocument = require('../models/PFDocument');
 const Invoice = require('../models/Invoice');
 const AdvancePayment = require('../models/AdvancePayment');
 const QuantityRecord = require('../models/QuantityRecord');
+const DeliveryChallan = require('../models/DeliveryChallan');
 const CompanySettings = require('../models/CompanySettings');
 const { getNextSequence } = require('../models/Counter');
 
@@ -42,7 +43,8 @@ exports.getClients = async (req, res, next) => {
       total,
       page: Number(page),
       totalPages: Math.ceil(total / limit),
-      data: clients
+      data: clients,
+      clients
     });
   } catch (error) {
     next(error);
@@ -270,11 +272,12 @@ exports.getClientDeletionSummary = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Client not found' });
     }
 
-    const [invoices, pfDocuments, advances, quantities] = await Promise.all([
+    const [invoices, pfDocuments, advances, quantities, challans] = await Promise.all([
       Invoice.find({ client: clientId }).select('invoiceNumber grandTotal amountPaid outstandingBalance paymentHistory'),
       PFDocument.find({ client: clientId }).select('pfNumber grandTotal status'),
       AdvancePayment.find({ client: clientId }).select('receiptNumber amount allocatedAmount unallocatedAmount status allocations'),
-      QuantityRecord.find({ client: clientId }).select('recordId quantity serviceName')
+      QuantityRecord.find({ client: clientId }).select('recordId quantity serviceName'),
+      DeliveryChallan.find({ client: clientId }).select('challanNumber status items')
     ]);
 
     // Calculate advance allocations and payments
@@ -297,7 +300,8 @@ exports.getClientDeletionSummary = async (req, res, next) => {
           advancePayments: advances.length,
           advanceAllocations: advanceAllocationsCount,
           invoicePayments: invoicePaymentsCount,
-          quantityRecords: quantities.length
+          quantityRecords: quantities.length,
+          deliveryChallans: challans.length
         },
         financialSummary: {
           totalInvoiced: invoices.reduce((acc, i) => acc + (i.grandTotal || 0), 0),
@@ -349,7 +353,10 @@ exports.permanentDeleteClient = async (req, res, next) => {
     // 4. Delete all Invoices belonging to this client
     const invoiceResult = await Invoice.deleteMany({ client: clientId }, opts);
 
-    // 5. Delete the Client itself
+    // 5. Delete all Delivery Challans belonging to this client
+    const challanResult = await DeliveryChallan.deleteMany({ client: clientId }, opts);
+
+    // 6. Delete the Client itself
     await Client.findByIdAndDelete(clientId, opts);
 
     if (useTransaction) {
@@ -357,7 +364,7 @@ exports.permanentDeleteClient = async (req, res, next) => {
       session.endSession();
     }
 
-    console.log(`[Permanent Deletion] Client ${client.clientId} (${client.companyName}) permanently deleted by ${req.user?.email || 'admin'}: ${invoiceResult.deletedCount} Invoices, ${pfResult.deletedCount} PFs, ${advanceResult.deletedCount} Advances, ${quantityResult.deletedCount} Quantities removed.`);
+    console.log(`[Permanent Deletion] Client ${client.clientId} (${client.companyName}) permanently deleted by ${req.user?.email || 'admin'}: ${invoiceResult.deletedCount} Invoices, ${pfResult.deletedCount} PFs, ${advanceResult.deletedCount} Advances, ${quantityResult.deletedCount} Quantities, ${challanResult.deletedCount} Challans removed.`);
 
     res.status(200).json({
       success: true,
@@ -370,7 +377,8 @@ exports.permanentDeleteClient = async (req, res, next) => {
           invoices: invoiceResult.deletedCount || 0,
           pfDocuments: pfResult.deletedCount || 0,
           advancePayments: advanceResult.deletedCount || 0,
-          quantityRecords: quantityResult.deletedCount || 0
+          quantityRecords: quantityResult.deletedCount || 0,
+          deliveryChallans: challanResult.deletedCount || 0
         }
       }
     });

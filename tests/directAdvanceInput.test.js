@@ -12,7 +12,9 @@ const AdvancePayment = require('../src/models/AdvancePayment');
 const PFDocument = require('../src/models/PFDocument');
 const { calculateDocumentTotals } = require('../src/utils/financials');
 
-const TEST_DB_URI = process.env.TEST_MONGODB_URI || 'mongodb://localhost:27017/innomatrics_crm_test';
+// Use Atlas URI with isolated test database; localhost fallback not available in this environment
+const TEST_DB_URI = process.env.TEST_MONGODB_URI ||
+  (process.env.MONGODB_URI ? process.env.MONGODB_URI.replace(/\/([^/?]+)(\?|$)/, '/innomatrics_e2e$2') : 'mongodb://localhost:27017/innomatrics_e2e');
 
 test('Direct Advance Amount Input & Invoice Settle Suite (9 Verification Scenarios)', async (t) => {
   await mongoose.connect(TEST_DB_URI);

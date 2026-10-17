@@ -11,8 +11,9 @@ const Invoice = require('../src/models/Invoice');
 const AdvancePayment = require('../src/models/AdvancePayment');
 const { calculateDocumentTotals } = require('../src/utils/financials');
 
-// Use isolated test database
-const TEST_DB_URI = process.env.TEST_MONGODB_URI || 'mongodb://localhost:27017/innomatrics_crm_test';
+// Use Atlas URI with isolated test database; localhost fallback not available in this environment
+const TEST_DB_URI = process.env.TEST_MONGODB_URI ||
+  (process.env.MONGODB_URI ? process.env.MONGODB_URI.replace(/\/([^/?]+)(\?|$)/, '/innomatrics_e2e$2') : 'mongodb://localhost:27017/innomatrics_e2e');
 
 test('Client Advance Payment, Invoice Allocation & Financial Integrity Suite (12 Scenarios)', async (t) => {
   await mongoose.connect(TEST_DB_URI);
