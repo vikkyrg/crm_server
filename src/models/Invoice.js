@@ -1,13 +1,18 @@
 const mongoose = require('mongoose');
 
 const invoiceItemSchema = new mongoose.Schema({
+  itemCode: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   service: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Service'
   },
   serviceId: {
     type: String,
-    required: true
+    default: 'INN-SRV-ADHOC'
   },
   description: {
     type: String,
@@ -128,6 +133,12 @@ const invoiceSchema = new mongoose.Schema(
       trim: true,
       index: true
     },
+    submissionKey: {
+      type: String,
+      trim: true,
+      sparse: true,
+      unique: true
+    },
     invoiceDate: {
       type: Date,
       default: Date.now,
@@ -182,6 +193,11 @@ const invoiceSchema = new mongoose.Schema(
     linkedChallanNumbers: [String],
     items: [invoiceItemSchema],
     documentDiscount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    totalItemDiscounts: {
       type: Number,
       default: 0,
       min: 0
@@ -246,6 +262,12 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       enum: ['Draft', 'Issued', 'Partially Paid', 'Paid', 'Overdue', 'Cancelled'],
       default: 'Draft',
+      index: true
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['Pending', 'Partially Paid', 'Paid'],
+      default: 'Pending',
       index: true
     },
     paymentTerms: {

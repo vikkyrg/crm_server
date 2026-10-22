@@ -7,7 +7,7 @@ const pfItemSchema = new mongoose.Schema({
   },
   serviceId: {
     type: String,
-    required: true
+    default: 'INN-SRV-ADHOC'
   },
   description: {
     type: String,

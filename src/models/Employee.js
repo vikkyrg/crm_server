@@ -77,6 +77,12 @@ const employeeSchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    address: {
+      street: { type: String, trim: true },
+      city: { type: String, trim: true },
+      state: { type: String, trim: true },
+      pincode: { type: String, trim: true }
+    },
     emergencyContact: {
       name: String,
       relationship: String,
@@ -89,7 +95,9 @@ const employeeSchema = new mongoose.Schema(
       accountNumber: { type: String, trim: true },
       ifscCode: { type: String, trim: true, uppercase: true },
       branch: { type: String, trim: true },
-      accountHolderName: { type: String, trim: true }
+      branchName: { type: String, trim: true },
+      accountHolderName: { type: String, trim: true },
+      panNumber: { type: String, trim: true, uppercase: true }
     },
 
     // PF & Statutory Information
@@ -98,9 +106,18 @@ const employeeSchema = new mongoose.Schema(
       aadhaarNumber: { type: String, trim: true },
       uan: { type: String, trim: true }, // Universal Account Number
       pfAccountNumber: { type: String, trim: true },
-      isPfEligible: { type: Boolean, default: true },
+      esiNumber: { type: String, trim: true },
+      pfApplicable: { type: Boolean },
+      isPfEligible: { type: Boolean, default: false },
+      pfWageBasis: { type: String, enum: ['Basic', 'Gross'], default: 'Basic' },
       pfEnrollmentDate: { type: Date },
-      pfWageLimitApplicable: { type: Boolean, default: false } // e.g. capping at Rs 15,000 wage ceiling
+      pfWageLimitApplicable: { type: Boolean, default: false },
+      restrictPfWageLimit: { type: Boolean, default: false },
+      esiApplicable: { type: Boolean, default: false },
+      isEsiEligible: { type: Boolean, default: false },
+      esiWageBasis: { type: String, enum: ['Basic', 'Gross'], default: 'Gross' },
+      esiEligibilityConfirmed: { type: Boolean, default: false },
+      esiInsuranceNumber: { type: String, trim: true }
     },
 
     // Salary Structure
@@ -114,10 +131,10 @@ const employeeSchema = new mongoose.Schema(
       grossSalary: { type: Number, default: 0, min: 0 },
       grossSalaryMonthly: { type: Number, default: 0, min: 0 },
 
-      // Statutory config
-      employeePfRate: { type: Number, default: 12 }, // default 12%
-      employerPfRate: { type: Number, default: 12 }, // default 12%
-      professionalTax: { type: Number, default: 200, min: 0 },
+      // Employee-level statutory overrides are intentionally unset unless verified/configured.
+      employeePfRate: { type: Number, min: 0, max: 100 },
+      employerPfRate: { type: Number, min: 0, max: 100 },
+      professionalTax: { type: Number, default: 0, min: 0 },
       tdsEstimate: { type: Number, default: 0, min: 0 },
       tdsMonthly: { type: Number, default: 0, min: 0 },
 
@@ -161,6 +178,22 @@ employeeSchema.pre('save', function (next) {
                           (Number(s.otherAllowances) || 0);
     s.grossSalary = computedGross;
     s.grossSalaryMonthly = computedGross;
+  }
+
+  // Synchronize bank and statutory aliases
+  if (this.bankDetails) {
+    if (this.bankDetails.branchName && !this.bankDetails.branch) {
+      this.bankDetails.branch = this.bankDetails.branchName;
+    }
+  }
+  if (this.statutoryInfo) {
+    const hasCeiling = Boolean(
+      this.statutoryInfo.restrictPfWageLimit !== undefined && this.statutoryInfo.restrictPfWageLimit !== null
+        ? (this.statutoryInfo.restrictPfWageLimit || this.statutoryInfo.pfWageLimitApplicable)
+        : this.statutoryInfo.pfWageLimitApplicable
+    );
+    this.statutoryInfo.restrictPfWageLimit = hasCeiling;
+    this.statutoryInfo.pfWageLimitApplicable = hasCeiling;
   }
   next();
 });

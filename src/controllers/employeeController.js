@@ -114,6 +114,10 @@ exports.getEmployee = async (req, res, next) => {
 // @access  Private (Administrator, Finance)
 exports.createEmployee = async (req, res, next) => {
   try {
+    const validation = validateStatutoryInfo(req.body.statutoryInfo);
+    if (validation) {
+      return res.status(400).json({ success: false, message: validation });
+    }
     let employeeId = req.body.employeeId;
     if (!employeeId || employeeId.trim() === '') {
       const settings = await CompanySettings.findOne();
@@ -164,6 +168,10 @@ exports.createEmployee = async (req, res, next) => {
 // @access  Private (Administrator, Finance)
 exports.updateEmployee = async (req, res, next) => {
   try {
+    const validation = validateStatutoryInfo(req.body.statutoryInfo);
+    if (validation) {
+      return res.status(400).json({ success: false, message: validation });
+    }
     const employee = await Employee.findById(req.params.id);
     if (!employee) {
       return res.status(404).json({ success: false, message: 'Employee not found' });
@@ -197,6 +205,20 @@ exports.updateEmployee = async (req, res, next) => {
     next(error);
   }
 };
+
+function validateStatutoryInfo(statutoryInfo) {
+  if (!statutoryInfo) return null;
+  if (statutoryInfo.uan && !/^\d{12}$/.test(String(statutoryInfo.uan).trim())) {
+    return 'UAN must contain exactly 12 digits';
+  }
+  if (statutoryInfo.pfWageBasis && !['Basic', 'Gross'].includes(statutoryInfo.pfWageBasis)) {
+    return 'PF wage basis must be Basic or Gross';
+  }
+  if (statutoryInfo.esiWageBasis && !['Basic', 'Gross'].includes(statutoryInfo.esiWageBasis)) {
+    return 'ESI wage basis must be Basic or Gross';
+  }
+  return null;
+}
 
 // @desc    Toggle or update employee status (Active / Inactive / Resigned)
 // @route   PATCH /api/employees/:id/status

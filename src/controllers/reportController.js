@@ -4,6 +4,8 @@ const PFDocument = require('../models/PFDocument');
 const Invoice = require('../models/Invoice');
 const AdvancePayment = require('../models/AdvancePayment');
 const QuantityRecord = require('../models/QuantityRecord');
+const CompanySettings = require('../models/CompanySettings');
+const { generateReportPDF } = require('../utils/reportPdfGenerator');
 
 // Helper to convert array of objects into standard CSV string
 const convertToCSV = (data, fields) => {
@@ -30,6 +32,8 @@ exports.exportReportCSV = async (req, res, next) => {
 
     let csvData = '';
     let filename = `Report_${type}_${Date.now()}.csv`;
+    let reportRows = [];
+    let reportFields = [];
 
     switch (type) {
       case 'clients': {
@@ -45,8 +49,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'State', value: 'state' },
           { label: 'Status', value: (row) => (row.isActive ? 'Active' : 'Inactive') }
         ];
+        reportRows = clients;
+        reportFields = fields;
         csvData = convertToCSV(clients, fields);
-        filename = `Innomatrics_Clients_${Date.now()}.csv`;
+        filename = `Navadurga_Clients_${Date.now()}.csv`;
         break;
       }
 
@@ -63,6 +69,7 @@ exports.exportReportCSV = async (req, res, next) => {
         }
         if (client) query.client = client;
         if (status) query.status = status;
+        if (req.query.invoiceType) query.invoiceType = req.query.invoiceType;
 
         const invoices = await Invoice.find(query).sort('-invoiceDate');
         const fields = [
@@ -77,8 +84,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Balance Outstanding', value: 'outstandingBalance' },
           { label: 'Status', value: 'status' }
         ];
+        reportRows = invoices;
+        reportFields = fields;
         csvData = convertToCSV(invoices, fields);
-        filename = `Innomatrics_Invoices_${Date.now()}.csv`;
+        filename = `Navadurga_Invoices_${Date.now()}.csv`;
         break;
       }
 
@@ -107,8 +116,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Status', value: 'status' },
           { label: 'Converted Invoice', value: 'convertedToInvoiceNumber' }
         ];
+        reportRows = pfs;
+        reportFields = fields;
         csvData = convertToCSV(pfs, fields);
-        filename = `Innomatrics_PF_Documents_${Date.now()}.csv`;
+        filename = `Navadurga_PF_Documents_${Date.now()}.csv`;
         break;
       }
 
@@ -138,8 +149,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Reference / UTR', value: 'transactionReference' },
           { label: 'Status', value: 'status' }
         ];
+        reportRows = advances;
+        reportFields = fields;
         csvData = convertToCSV(advances, fields);
-        filename = `Innomatrics_Advance_Payments_${Date.now()}.csv`;
+        filename = `Navadurga_Advance_Payments_${Date.now()}.csv`;
         break;
       }
 
@@ -170,8 +183,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Related Invoice', value: 'relatedInvoiceNumber' },
           { label: 'Notes', value: 'notes' }
         ];
+        reportRows = quantities;
+        reportFields = fields;
         csvData = convertToCSV(quantities, fields);
-        filename = `Innomatrics_Quantity_Register_${Date.now()}.csv`;
+        filename = `Navadurga_Quantity_Register_${Date.now()}.csv`;
         break;
       }
 
@@ -187,8 +202,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'SAC Code', value: 'sacCode' },
           { label: 'Status', value: (r) => (r.isActive ? 'Active' : 'Inactive') }
         ];
+        reportRows = services;
+        reportFields = fields;
         csvData = convertToCSV(services, fields);
-        filename = `Innomatrics_Services_Catalog_${Date.now()}.csv`;
+        filename = `Navadurga_Services_Catalog_${Date.now()}.csv`;
         break;
       }
 
@@ -209,8 +226,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'UAN', value: (r) => r.statutoryInfo?.uan || '' },
           { label: 'PF Account No', value: (r) => r.statutoryInfo?.pfAccountNumber || '' }
         ];
+        reportRows = employees;
+        reportFields = fields;
         csvData = convertToCSV(employees, fields);
-        filename = `Innomatrics_Employees_Directory_${Date.now()}.csv`;
+        filename = `Navadurga_Employees_Directory_${Date.now()}.csv`;
         break;
       }
 
@@ -232,11 +251,14 @@ exports.exportReportCSV = async (req, res, next) => {
               paidDays: item.paidDays,
               grossEarnings: item.grossEarnings,
               employeePf: item.employeePfContribution,
+              employeeEsi: item.employeeEsiContribution || 0,
               professionalTax: item.professionalTax,
               tds: item.tdsDeduction,
+              otherDeductions: item.otherDeductions || 0,
               totalDeductions: item.totalEmployeeDeductions,
               netSalaryPayable: item.netSalaryPayable,
               employerPf: item.employerPfContribution,
+              employerEsi: item.employerEsiContribution || 0,
               employerCostTotal: item.employerCostTotal,
               paymentStatus: item.paymentStatus,
               paymentReference: item.paymentReference || ''
@@ -254,18 +276,23 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Working Days', value: 'workingDays' },
           { label: 'Paid Days', value: 'paidDays' },
           { label: 'Gross Earnings', value: 'grossEarnings' },
-          { label: 'Employee PF (12%)', value: 'employeePf' },
+          { label: 'Employee PF', value: 'employeePf' },
+          { label: 'Employee ESI', value: 'employeeEsi' },
           { label: 'Prof Tax', value: 'professionalTax' },
           { label: 'TDS', value: 'tds' },
+          { label: 'Other Deductions', value: 'otherDeductions' },
           { label: 'Total Deductions', value: 'totalDeductions' },
           { label: 'Net Take-Home', value: 'netSalaryPayable' },
-          { label: 'Employer PF (12%)', value: 'employerPf' },
+          { label: 'Employer PF', value: 'employerPf' },
+          { label: 'Employer ESI', value: 'employerEsi' },
           { label: 'Employer CTC', value: 'employerCostTotal' },
           { label: 'Payment Status', value: 'paymentStatus' },
           { label: 'Payment Ref', value: 'paymentReference' }
         ];
+        reportRows = rows;
+        reportFields = fields;
         csvData = convertToCSV(rows, fields);
-        filename = `Innomatrics_Monthly_Payroll_Register_${Date.now()}.csv`;
+        filename = `Navadurga_Monthly_Payroll_Register_${Date.now()}.csv`;
         break;
       }
 
@@ -287,8 +314,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Challan TRRN / Ref', value: 'challanNumber' },
           { label: 'Remittance Date', value: (r) => r.remittanceDate ? new Date(r.remittanceDate).toLocaleDateString('en-IN') : '' }
         ];
+        reportRows = pfRecords;
+        reportFields = fields;
         csvData = convertToCSV(pfRecords, fields);
-        filename = `Innomatrics_Employee_PF_Statutory_Register_${Date.now()}.csv`;
+        filename = `Navadurga_Employee_PF_Statutory_Register_${Date.now()}.csv`;
         break;
       }
 
@@ -332,8 +361,10 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Transporter', value: 'transporter' },
           { label: 'Vehicle Number', value: 'vehicleNumber' }
         ];
+        reportRows = rows;
+        reportFields = fields;
         csvData = convertToCSV(rows, fields);
-        filename = `Innomatrics_Delivery_Challans_Register_${Date.now()}.csv`;
+        filename = `Navadurga_Delivery_Challans_Register_${Date.now()}.csv`;
         break;
       }
 
@@ -354,13 +385,49 @@ exports.exportReportCSV = async (req, res, next) => {
           { label: 'Outstanding Balance', value: 'outstandingBalance' },
           { label: 'Status', value: 'status' }
         ];
+        reportRows = matInvoices;
+        reportFields = fields;
         csvData = convertToCSV(matInvoices, fields);
-        filename = `Innomatrics_Material_Invoices_${Date.now()}.csv`;
+        filename = `Navadurga_Material_Invoices_${Date.now()}.csv`;
         break;
       }
 
       default:
         return res.status(400).json({ success: false, message: 'Invalid report type' });
+    }
+
+    if (req.query.format === 'pdf') {
+      const reportTitles = {
+        clients: 'Client Directory Register',
+        invoices: 'Tax Invoices Master Register',
+        'material-invoices': 'Material Invoices Register',
+        'delivery-challans': 'Delivery Challans Register',
+        employees: 'Employee Directory & Salary Register',
+        payroll: 'Monthly Payroll Register',
+        'employee-pf': 'EPFO Statutory PF Register',
+        'pf-documents': 'PF Documents & Quotations Register',
+        advances: 'Advance Receipts & Retainer Ledger',
+        quantities: 'Quantity Deliverables Register',
+        services: 'Services & Rate Catalog Report'
+      };
+      const settings = await CompanySettings.findOne().lean();
+      const supportsDateRange = ['invoices', 'pf-documents', 'advances', 'quantities'].includes(type);
+      const period = supportsDateRange && (startDate || endDate)
+        ? `${startDate || 'Start'} to ${endDate || 'Present'}`
+        : 'All available dates';
+      const pdfBuffer = await generateReportPDF({
+        rows: reportRows,
+        fields: reportFields,
+        reportTitle: reportTitles[type],
+        companyName: settings?.companyName || 'Navadurga Electricals',
+        period
+      });
+
+      filename = filename.replace(/\.csv$/i, '.pdf');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('X-Report-Empty', String(reportRows.length === 0));
+      return res.status(200).send(pdfBuffer);
     }
 
     res.setHeader('Content-Type', 'text/csv');

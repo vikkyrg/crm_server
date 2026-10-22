@@ -41,8 +41,8 @@ const seedData = async () => {
 
     // 1. Company Settings
     const settings = await CompanySettings.create({
-      companyName: 'Innomatrics Technologies Pvt Ltd',
-      displayName: 'Innomatrics Technologies',
+      companyName: 'Navadurga Electricals',
+      displayName: 'Navadurga Electricals',
       tagline: 'Enterprise Cloud, AI & Digital Transformation Solutions',
       address: 'Suite 402, Alpha Tech Park, Electronic City, Noida, Uttar Pradesh',
       city: 'Noida',
@@ -66,7 +66,7 @@ const seedData = async () => {
       servicePrefix: 'INN-SRV-',
       quantityPrefix: 'QTY-2026-',
       defaultPaymentTerms: 'Payment due within 15 days of invoice date. 18% annual interest applies on delayed settlements.',
-      defaultNotes: 'Thank you for choosing Innomatrics as your technology partner!'
+      defaultNotes: 'Thank you for choosing Navadurga Electricals!'
     });
 
     // 2. Initial Administrator User (Single Master Admin)

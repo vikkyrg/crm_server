@@ -4,11 +4,11 @@ const companySettingsSchema = new mongoose.Schema(
   {
     companyName: {
       type: String,
-      default: 'Innomatrics Technologies'
+      default: 'Navadurga Electricals'
     },
     displayName: {
       type: String,
-      default: 'Innomatrics Technologies'
+      default: 'Navadurga Electricals'
     },
     tagline: {
       type: String,
@@ -120,12 +120,29 @@ const companySettingsSchema = new mongoose.Schema(
     },
     defaultNotes: {
       type: String,
-      default: 'Thank you for partnering with Innomatrics Technologies!'
+      default: 'Thank you for partnering with Navadurga Electricals!'
     },
     roundingPolicy: {
       type: String,
       enum: ['round_to_nearest', 'none'],
       default: 'round_to_nearest'
+    },
+    statutoryPayrollRules: {
+      pf: {
+        employeeRate: { type: Number, min: 0, max: 100 },
+        employerRate: { type: Number, min: 0, max: 100 },
+        wageCeiling: { type: Number, min: 0 },
+        epsRate: { type: Number, min: 0, max: 100 },
+        effectiveFrom: Date,
+        effectiveTo: Date
+      },
+      esi: {
+        employeeRate: { type: Number, min: 0, max: 100 },
+        employerRate: { type: Number, min: 0, max: 100 },
+        wageCeiling: { type: Number, min: 0 },
+        effectiveFrom: Date,
+        effectiveTo: Date
+      }
     }
   },
   {

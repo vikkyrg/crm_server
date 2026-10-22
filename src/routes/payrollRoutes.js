@@ -5,6 +5,7 @@ const {
   getPayrollRun,
   previewMonthlyPayroll,
   savePayrollRun,
+  finalizePayrollBatch,
   recordSalaryPayment,
   downloadPayslipPDF
 } = require('../controllers/payrollController');
@@ -21,6 +22,8 @@ router.post('/save', authorize('Administrator'), savePayrollRun);
 
 router.route('/:id')
   .get(authorize('Administrator'), getPayrollRun);
+
+router.post('/:id/finalize', authorize('Administrator'), finalizePayrollBatch);
 
 router.post('/:id/pay/:employeeId', authorize('Administrator'), recordSalaryPayment);
 router.post('/:id/employees/:employeeId/payment', authorize('Administrator'), recordSalaryPayment);

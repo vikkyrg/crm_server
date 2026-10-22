@@ -7,6 +7,64 @@ const { getNextSequence } = require('../models/Counter');
 const { calculateDocumentTotals, round2 } = require('../utils/financials');
 const { generateDocumentPDF, generateDocumentDocx } = require('../utils/documentGenerator');
 
+const validateInvoiceItems = (items, invoiceType) => {
+  if (!Array.isArray(items) || items.length === 0) return 'At least one line item is required';
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index] || {};
+    const label = `Line ${index + 1}`;
+    if (!String(item.description || '').trim()) return `${label}: description is required`;
+    if (invoiceType === 'Material' && !String(item.itemCode || '').trim()) return `${label}: material item code is required`;
+    if (invoiceType === 'Material' && !String(item.unit || '').trim()) return `${label}: material unit is required`;
+    const quantity = Number(item.quantity);
+    const unitPrice = Number(item.unitPrice);
+    const discountPercent = Number(item.discountPercent || 0);
+    const taxRate = Number(item.taxRate || 0);
+    if (item.quantity === '' || item.quantity === null || item.quantity === undefined) {
+      return `${label}: quantity is required`;
+    }
+    if (item.unitPrice === '' || item.unitPrice === null || item.unitPrice === undefined) {
+      return `${label}: unit price is required`;
+    }
+    if (item.taxRate === '' || item.taxRate === null || item.taxRate === undefined) {
+      return `${label}: GST rate is required`;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) return `${label}: quantity must be greater than zero`;
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return `${label}: unit price must be zero or greater`;
+    if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+      return `${label}: discount must be between 0 and 100 percent`;
+    }
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+      return `${label}: GST rate must be between 0 and 100 percent`;
+    }
+  }
+  return null;
+};
+
+const validateDocumentDiscount = (documentDiscount, items) => {
+  const discount = Number(documentDiscount || 0);
+  if (!Number.isFinite(discount) || discount < 0) return 'Document discount must be a valid non-negative amount';
+  const taxableBeforeDocumentDiscount = items.reduce((sum, item) => {
+    const gross = Number(item.unitPrice) * Number(item.quantity);
+    const lineDiscount = gross * (Number(item.discountPercent || 0) / 100);
+    return sum + (gross - lineDiscount);
+  }, 0);
+  if (discount > taxableBeforeDocumentDiscount) return 'Document discount cannot exceed the taxable subtotal';
+  return null;
+};
+
+const refreshInvoiceStatuses = (invoice) => {
+  const paid = round2((Number(invoice.amountPaid) || 0) + (Number(invoice.creditAdjustment) || 0));
+  invoice.outstandingBalance = round2(Math.max(0, Number(invoice.grandTotal) - paid));
+  invoice.paymentStatus = paid >= Number(invoice.grandTotal) && Number(invoice.grandTotal) > 0
+    ? 'Paid'
+    : paid > 0 ? 'Partially Paid' : 'Pending';
+  if (invoice.status !== 'Cancelled' && invoice.status !== 'Draft') {
+    if (invoice.outstandingBalance === 0 && Number(invoice.grandTotal) > 0) invoice.status = 'Paid';
+    else if (paid > 0) invoice.status = 'Partially Paid';
+    else invoice.status = invoice.dueDate && new Date(invoice.dueDate) < new Date() ? 'Overdue' : 'Issued';
+  }
+};
+
 // @desc    Get all invoices with filtering, status, date range, client, and pagination
 // @route   GET /api/invoices
 // @access  Private
@@ -96,6 +154,18 @@ exports.getInvoice = async (req, res, next) => {
 // @access  Private
 exports.createInvoice = async (req, res, next) => {
   try {
+    const submissionKey = String(req.body.submissionKey || '').trim();
+    if (submissionKey) {
+      const existingSubmission = await Invoice.findOne({ submissionKey });
+      if (existingSubmission) {
+        return res.status(200).json({
+          success: true,
+          data: existingSubmission,
+          message: 'Invoice was already created for this submission'
+        });
+      }
+    }
+
     const {
       clientId,
       invoiceDate,
@@ -112,13 +182,28 @@ exports.createInvoice = async (req, res, next) => {
       linkedChallanNumbers
     } = req.body;
 
+    if (invoiceType && !['Service', 'Material'].includes(invoiceType)) {
+      return res.status(400).json({ success: false, message: 'Invoice type must be Service or Material' });
+    }
+    if (invoiceDate && Number.isNaN(new Date(invoiceDate).getTime())) {
+      return res.status(400).json({ success: false, message: 'Invoice date is invalid' });
+    }
+    if (dueDate && Number.isNaN(new Date(dueDate).getTime())) {
+      return res.status(400).json({ success: false, message: 'Due date is invalid' });
+    }
+    if (invoiceDate && dueDate && new Date(dueDate) < new Date(invoiceDate)) {
+      return res.status(400).json({ success: false, message: 'Due date cannot be before invoice date' });
+    }
     if (!clientId) {
       return res.status(400).json({ success: false, message: 'Client is required' });
     }
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one line item is required' });
+    const itemValidationError = validateInvoiceItems(items, invoiceType || 'Service');
+    if (itemValidationError) {
+      return res.status(400).json({ success: false, message: itemValidationError });
     }
+    const discountError = validateDocumentDiscount(documentDiscount, items);
+    if (discountError) return res.status(400).json({ success: false, message: discountError });
 
     const client = await Client.findById(clientId);
     if (!client) {
@@ -278,7 +363,7 @@ exports.createInvoice = async (req, res, next) => {
     const initialPaid = totalAdvanceApplied;
     const initialBalance = round2(totals.grandTotal - initialPaid);
     let initialStatus = 'Issued';
-    if (initialBalance <= 0) {
+    if (initialPaid > 0 && initialBalance <= 0) {
       initialStatus = 'Paid';
     } else if (initialPaid > 0) {
       initialStatus = 'Partially Paid';
@@ -286,6 +371,7 @@ exports.createInvoice = async (req, res, next) => {
 
     const invoice = await Invoice.create({
       invoiceNumber,
+      submissionKey: submissionKey || undefined,
       invoiceDate: invoiceDate || new Date(),
       dueDate: finalDueDate,
       client: client._id,
@@ -310,6 +396,7 @@ exports.createInvoice = async (req, res, next) => {
       linkedChallanNumbers: linkedChallanNumbers || [],
       items: totals.items,
       documentDiscount: totals.documentDiscount,
+      totalItemDiscounts: totals.totalItemDiscounts,
       subtotal: totals.subtotal,
       totalTaxableAmount: totals.totalTaxableAmount,
       cgstTotal: totals.cgstTotal,
@@ -323,6 +410,9 @@ exports.createInvoice = async (req, res, next) => {
       creditAdjustment: 0,
       outstandingBalance: initialBalance,
       status: initialStatus,
+      paymentStatus: totals.grandTotal > 0 && initialPaid >= totals.grandTotal
+        ? 'Paid'
+        : initialPaid > 0 ? 'Partially Paid' : 'Pending',
       paymentTerms: paymentTerms || companySettings.defaultPaymentTerms,
       notes: notes || companySettings.defaultNotes,
       createdBy: req.user._id
@@ -385,6 +475,16 @@ exports.createInvoice = async (req, res, next) => {
         : 'Invoice created successfully'
     });
   } catch (error) {
+    if (error.code === 11000 && req.body.submissionKey) {
+      try {
+        const duplicate = await Invoice.findOne({ submissionKey: String(req.body.submissionKey).trim() });
+        if (duplicate) {
+          return res.status(200).json({ success: true, data: duplicate, message: 'Invoice was already created for this submission' });
+        }
+      } catch (lookupError) {
+        return next(lookupError);
+      }
+    }
     next(error);
   }
 };
@@ -398,6 +498,15 @@ exports.updateInvoice = async (req, res, next) => {
     if (!invoice) {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
+    if (req.body.invoiceDate && Number.isNaN(new Date(req.body.invoiceDate).getTime())) {
+      return res.status(400).json({ success: false, message: 'Invoice date is invalid' });
+    }
+    if (req.body.dueDate && Number.isNaN(new Date(req.body.dueDate).getTime())) {
+      return res.status(400).json({ success: false, message: 'Due date is invalid' });
+    }
+    if (req.body.invoiceDate && req.body.dueDate && new Date(req.body.dueDate) < new Date(req.body.invoiceDate)) {
+      return res.status(400).json({ success: false, message: 'Due date cannot be before invoice date' });
+    }
 
     // Only Draft invoices or non-financial fields on Issued invoices can be edited
     if (invoice.status === 'Paid' || invoice.amountPaid > 0) {
@@ -405,6 +514,7 @@ exports.updateInvoice = async (req, res, next) => {
       invoice.notes = req.body.notes !== undefined ? req.body.notes : invoice.notes;
       invoice.paymentTerms = req.body.paymentTerms !== undefined ? req.body.paymentTerms : invoice.paymentTerms;
       if (req.body.dueDate) invoice.dueDate = req.body.dueDate;
+      refreshInvoiceStatuses(invoice);
       await invoice.save();
 
       return res.status(200).json({
@@ -421,7 +531,7 @@ exports.updateInvoice = async (req, res, next) => {
       documentDiscount,
       notes,
       paymentTerms,
-      status
+      projectOrWorkOrder
     } = req.body;
 
     const companySettings = await CompanySettings.findOne() || {};
@@ -429,10 +539,20 @@ exports.updateInvoice = async (req, res, next) => {
     const companyStateCode = (companySettings.stateCode || '09').trim();
     const isInterState = Boolean(clientStateCode && companyStateCode && clientStateCode !== companyStateCode);
 
-    if (items && items.length > 0) {
+    if (items !== undefined) {
+      const itemValidationError = validateInvoiceItems(items, invoice.invoiceType);
+      if (itemValidationError) {
+        return res.status(400).json({ success: false, message: itemValidationError });
+      }
+      const discountError = validateDocumentDiscount(
+        documentDiscount !== undefined ? documentDiscount : invoice.documentDiscount,
+        items
+      );
+      if (discountError) return res.status(400).json({ success: false, message: discountError });
       const totals = calculateDocumentTotals(items, documentDiscount !== undefined ? documentDiscount : invoice.documentDiscount, isInterState, companySettings.roundingPolicy !== 'none');
       invoice.items = totals.items;
       invoice.documentDiscount = totals.documentDiscount;
+      invoice.totalItemDiscounts = totals.totalItemDiscounts;
       invoice.subtotal = totals.subtotal;
       invoice.totalTaxableAmount = totals.totalTaxableAmount;
       invoice.cgstTotal = totals.cgstTotal;
@@ -448,7 +568,8 @@ exports.updateInvoice = async (req, res, next) => {
     if (dueDate) invoice.dueDate = dueDate;
     if (notes !== undefined) invoice.notes = notes;
     if (paymentTerms !== undefined) invoice.paymentTerms = paymentTerms;
-    if (status) invoice.status = status;
+    if (projectOrWorkOrder !== undefined) invoice.projectOrWorkOrder = projectOrWorkOrder;
+    refreshInvoiceStatuses(invoice);
 
     await invoice.save();
 
@@ -499,12 +620,7 @@ exports.recordInvoicePayment = async (req, res, next) => {
 
     invoice.amountPaid = round2(invoice.amountPaid + paymentAmount);
     invoice.outstandingBalance = round2(invoice.grandTotal - invoice.amountPaid - invoice.creditAdjustment);
-
-    if (invoice.outstandingBalance <= 0) {
-      invoice.status = 'Paid';
-    } else {
-      invoice.status = 'Partially Paid';
-    }
+    refreshInvoiceStatuses(invoice);
 
     await invoice.save();
 
@@ -629,3 +745,6 @@ exports.deleteInvoice = async (req, res, next) => {
   }
 };
 
+exports.validateInvoiceItems = validateInvoiceItems;
+exports.validateDocumentDiscount = validateDocumentDiscount;
+exports.refreshInvoiceStatuses = refreshInvoiceStatuses;

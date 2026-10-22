@@ -22,13 +22,13 @@ const generateAdvanceReceiptPDF = (advance, companySettings, res) => {
   }
 
   if (headerStartY === 40) {
-    doc.fillColor(primaryColor).fontSize(18).text(companySettings.companyName || 'Innomatrics Technologies', 40, headerStartY, { bold: true });
+    doc.fillColor(primaryColor).fontSize(18).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
     doc.fillColor('#4b5563').fontSize(8.5).text(companySettings.tagline || 'Leading Edge Software & Cloud Solutions', 40, headerStartY + 22);
     doc.text(companySettings.address || '', 40, headerStartY + 34);
     doc.text(`Phone: ${companySettings.phone || ''} | Email: ${companySettings.email || ''}`, 40, headerStartY + 45);
     doc.text(`GSTIN: ${companySettings.gstin || 'N/A'} | PAN: ${companySettings.pan || 'N/A'}`, 40, headerStartY + 56);
   } else {
-    doc.fillColor(primaryColor).fontSize(14).text(companySettings.companyName || 'Innomatrics Technologies', 40, headerStartY, { bold: true });
+    doc.fillColor(primaryColor).fontSize(14).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
     doc.fillColor('#4b5563').fontSize(8).text(`${companySettings.address || ''} | Phone: ${companySettings.phone || ''} | GSTIN: ${companySettings.gstin || 'N/A'}`, 40, headerStartY + 16, { width: 300 });
   }
 
@@ -103,7 +103,7 @@ const generateAdvanceReceiptPDF = (advance, companySettings, res) => {
   // Signatory
   const footerY = 730;
   doc.moveTo(380, footerY).lineTo(540, footerY).strokeColor('#9ca3af').stroke();
-  doc.fontSize(8).fillColor('#4b5563').text(`For ${companySettings.companyName || 'Innomatrics Technologies'}`, 380, footerY + 5, { align: 'center', width: 160 });
+  doc.fontSize(8).fillColor('#4b5563').text(`For ${companySettings.companyName || 'Navadurga Electricals'}`, 380, footerY + 5, { align: 'center', width: 160 });
   doc.text('Authorized Signatory', 380, footerY + 18, { align: 'center', width: 160 });
 
   doc.end();

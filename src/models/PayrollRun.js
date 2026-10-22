@@ -35,7 +35,9 @@ const payrollItemSchema = new mongoose.Schema({
 
   // Employee Deductions Breakdown
   pfWageBase: { type: Number, default: 0 },
+  esiWageBase: { type: Number, default: 0 },
   employeePfContribution: { type: Number, default: 0 },
+  employeeEsiContribution: { type: Number, default: 0 },
   professionalTax: { type: Number, default: 0 },
   tdsDeduction: { type: Number, default: 0 },
   otherDeductions: { type: Number, default: 0 },
@@ -46,7 +48,24 @@ const payrollItemSchema = new mongoose.Schema({
 
   // Employer Contributions (Cost to Company side, not deducted from employee)
   employerPfContribution: { type: Number, default: 0 },
+  employerEsiContribution: { type: Number, default: 0 },
+  epsContribution: { type: Number, default: 0 },
+  epfDifference: { type: Number, default: 0 },
   employerCostTotal: { type: Number, default: 0 },
+  statutoryCalculation: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  pfRemittanceStatus: {
+    type: String,
+    enum: ['Not Applicable', 'Pending', 'Submitted', 'Remitted'],
+    default: 'Not Applicable'
+  },
+  esiRemittanceStatus: {
+    type: String,
+    enum: ['Not Applicable', 'Pending', 'Submitted', 'Remitted'],
+    default: 'Not Applicable'
+  },
 
   // Payment Status
   paymentStatus: {
@@ -57,7 +76,16 @@ const payrollItemSchema = new mongoose.Schema({
   paymentDate: Date,
   paymentMethod: {
     type: String,
-    enum: ['Bank Transfer', 'NEFT/RTGS', 'UPI', 'Cheque', 'Cash'],
+    enum: [
+      'Bank Transfer',
+      'Bank Transfer (NEFT/IMPS)',
+      'NEFT/RTGS',
+      'UPI',
+      'UPI / Direct Credit',
+      'Cheque',
+      'Company Cheque',
+      'Cash'
+    ],
     default: 'Bank Transfer'
   },
   paymentReference: String,
@@ -95,6 +123,8 @@ const payrollRunSchema = new mongoose.Schema(
     totalGrossEarnings: { type: Number, default: 0 },
     totalEmployeePf: { type: Number, default: 0 },
     totalEmployerPf: { type: Number, default: 0 },
+    totalEmployeeEsi: { type: Number, default: 0 },
+    totalEmployerEsi: { type: Number, default: 0 },
     totalPfContribution: { type: Number, default: 0 },
     totalProfessionalTax: { type: Number, default: 0 },
     totalTdsDeductions: { type: Number, default: 0 },
@@ -108,6 +138,12 @@ const payrollRunSchema = new mongoose.Schema(
       type: String,
       enum: ['Draft', 'Processing', 'Finalized', 'Cancelled'],
       default: 'Draft',
+      index: true
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['Pending', 'Partially Paid', 'Paid'],
+      default: 'Pending',
       index: true
     },
     finalizedAt: Date,
@@ -127,5 +163,37 @@ const payrollRunSchema = new mongoose.Schema(
 );
 
 payrollRunSchema.index({ month: 1, year: 1 }, { unique: true });
+
+// Pre-save hook to ensure aggregated payment fields and batch paymentStatus are consistently maintained
+payrollRunSchema.pre('save', function (next) {
+  if (Array.isArray(this.items) && this.items.length > 0) {
+    let paidSum = 0;
+    let paidCount = 0;
+
+    for (const item of this.items) {
+      if (item.paymentStatus === 'Paid') {
+        paidSum += (Number(item.netSalaryPayable) || 0);
+        paidCount++;
+      }
+    }
+
+    const round2 = (num) => Math.round((Number(num) + Number.EPSILON) * 100) / 100;
+    this.totalAmountPaid = round2(paidSum);
+    this.totalPendingAmount = round2(Math.max(0, (Number(this.totalNetPayable) || 0) - this.totalAmountPaid));
+
+    if (paidCount === this.items.length && this.items.length > 0) {
+      this.paymentStatus = 'Paid';
+    } else if (paidCount > 0) {
+      this.paymentStatus = 'Partially Paid';
+    } else {
+      this.paymentStatus = 'Pending';
+    }
+  } else {
+    this.totalAmountPaid = 0;
+    this.totalPendingAmount = 0;
+    this.paymentStatus = 'Pending';
+  }
+  next();
+});
 
 module.exports = mongoose.model('PayrollRun', payrollRunSchema);

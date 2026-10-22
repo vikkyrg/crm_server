@@ -32,6 +32,8 @@ const employeePfRecordSchema = new mongoose.Schema(
     pfWageBase: { type: Number, required: true, min: 0 },
     employeeContribution: { type: Number, required: true, min: 0 },
     employerContribution: { type: Number, required: true, min: 0 },
+    epsContribution: { type: Number, default: 0 }, // 8.33% EPS component
+    epfDifference: { type: Number, default: 0 },   // 3.67% EPF component
     adminCharges: { type: Number, default: 0 }, // EDLI + Admin component if configured
     totalPfAmount: { type: Number, required: true, min: 0 },
 

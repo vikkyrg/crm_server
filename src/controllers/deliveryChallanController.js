@@ -97,13 +97,67 @@ exports.createChallan = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Client selection is required' });
     }
 
-    if (!items || !items.length) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one material item is required' });
     }
 
     const client = await Client.findById(clientId);
     if (!client) {
-      return res.status(404).json({ success: false, message: 'Client not found' });
+      return res.status(404).json({ success: false, message: 'Selected client not found' });
+    }
+
+    const finalDeliveryAddress = (deliveryAddress || client.shippingAddress || client.billingAddress || '').trim();
+    if (!finalDeliveryAddress) {
+      return res.status(400).json({ success: false, message: 'Delivery address is required' });
+    }
+
+    // Validate and sanitize deliveryType against valid enum values
+    const validDeliveryTypes = [
+      'Supply on Approval',
+      'Job Work',
+      'Project Site Delivery',
+      'Material Supply',
+      'Inter-Branch Transfer',
+      'Other'
+    ];
+    let sanitizedDeliveryType = (deliveryType || '').trim();
+    if (sanitizedDeliveryType === 'Material Supply to Site') {
+      sanitizedDeliveryType = 'Material Supply';
+    } else if (!validDeliveryTypes.includes(sanitizedDeliveryType)) {
+      sanitizedDeliveryType = 'Material Supply';
+    }
+
+    // Validate and format items
+    const formattedItems = [];
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
+      const description = (item.description || '').trim();
+      if (!description) {
+        return res.status(400).json({
+          success: false,
+          message: `Item #${idx + 1}: Description is required`
+        });
+      }
+
+      const qty = Number(item.quantityDispatched ?? item.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Item #${idx + 1} (${description}): Dispatched quantity must be greater than 0`
+        });
+      }
+
+      formattedItems.push({
+        itemCode: (item.itemCode || '').trim() || `MAT-${String(idx + 1).padStart(3, '0')}`,
+        description,
+        quantityDispatched: qty,
+        quantityDelivered: 0,
+        quantityInvoiced: 0,
+        unit: (item.unit || '').trim() || 'Units',
+        batchOrSerialNo: (item.batchOrSerialNo || '').trim(),
+        unitPriceEstimate: Math.max(0, Number(item.unitPriceEstimate ?? item.unitPrice) || 0),
+        notes: (item.notes || item.remarks || '').trim()
+      });
     }
 
     const settings = await CompanySettings.findOne() || {};
@@ -119,19 +173,6 @@ exports.createChallan = async (req, res, next) => {
       }
     }
     const challanNumber = candidateNumber;
-
-    // Format items with validation
-    const formattedItems = items.map((item, idx) => ({
-      itemCode: item.itemCode || `MAT-${String(idx + 1).padStart(3, '0')}`,
-      description: item.description || 'Material / Hardware Unit',
-      quantityDispatched: Math.max(0.01, Number(item.quantityDispatched || item.quantity) || 1),
-      quantityDelivered: 0,
-      quantityInvoiced: 0,
-      unit: item.unit || 'Units',
-      batchOrSerialNo: item.batchOrSerialNo || '',
-      unitPriceEstimate: Math.max(0, Number(item.unitPriceEstimate || item.unitPrice) || 0),
-      notes: item.notes || ''
-    }));
 
     const challan = await DeliveryChallan.create({
       challanNumber,
@@ -150,20 +191,20 @@ exports.createChallan = async (req, res, next) => {
         pincode: client.pincode,
         gstin: client.gstin
       },
-      deliveryAddress: deliveryAddress || client.shippingAddress || client.billingAddress,
-      deliveryType: deliveryType || 'Material Supply',
-      projectOrWorkOrder,
+      deliveryAddress: finalDeliveryAddress,
+      deliveryType: sanitizedDeliveryType,
+      projectOrWorkOrder: (projectOrWorkOrder || '').trim(),
       items: formattedItems,
-      transporterName,
-      vehicleNumber,
-      driverName,
-      driverPhone,
-      lrOrDocketNumber,
+      transporterName: (transporterName || '').trim(),
+      vehicleNumber: (vehicleNumber || '').trim().toUpperCase(),
+      driverName: (driverName || '').trim(),
+      driverPhone: (driverPhone || '').trim(),
+      lrOrDocketNumber: (lrOrDocketNumber || '').trim(),
       dispatchDate: dispatchDate || (challanDate || new Date()),
-      expectedDeliveryDate,
+      expectedDeliveryDate: expectedDeliveryDate || undefined,
       status: 'Issued',
       termsAndConditions: termsAndConditions || 'Goods once dispatched are subject to physical inspection at destination.',
-      notes,
+      notes: (notes || '').trim(),
       createdBy: req.user._id
     });
 
@@ -331,92 +372,232 @@ exports.downloadChallanPDF = async (req, res, next) => {
 
     const companySettings = await CompanySettings.findOne() || {};
 
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${challan.challanNumber}.pdf"`);
     doc.pipe(res);
 
     const primaryColor = '#1e40af';
     const textColor = '#1f2937';
+    const mutedColor = '#64748b';
+    const borderColor = '#cbd5e1';
 
-    // Header
-    doc.fillColor(primaryColor).fontSize(18).text(companySettings.companyName || 'Innomatrics Technologies', 40, 40, { bold: true });
-    doc.fillColor('#4b5563').fontSize(8.5).text(companySettings.tagline || 'Engineering & Logistics Division', 40, 62);
-    doc.text(`${companySettings.address || ''} | Phone: ${companySettings.phone || ''}`, 40, 74);
-    doc.text(`GSTIN: ${companySettings.gstin || 'N/A'}`, 40, 86);
+    // Page Geometry
+    const leftMargin = 40;
+    const pageWidth = 515; // 595.28 - 2 * 40 = 515.28 pt
 
-    doc.fillColor(primaryColor).fontSize(14).text('DELIVERY CHALLAN', 380, 40, { align: 'right', bold: true });
-    doc.fillColor(textColor).fontSize(9.5).text(`Challan No: ${challan.challanNumber}`, 380, 58, { align: 'right' });
-    doc.text(`Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, 380, 72, { align: 'right' });
-    doc.text(`Status: ${challan.status}`, 380, 86, { align: 'right' });
+    // Table Column Definitions
+    const colSrX = 40;
+    const colSrW = 28;
 
-    doc.moveTo(40, 102).lineTo(555, 102).strokeColor('#e2e8f0').lineWidth(1).stroke();
+    const colDescX = 68;
+    const colDescW = 237;
+
+    const colBatchX = 305;
+    const colBatchW = 80;
+
+    const colDispX = 385;
+    const colDispW = 65;
+
+    const colDelivX = 450;
+    const colDelivW = 65;
+
+    // Helper: Render Table Header
+    const renderTableHeader = (headerY) => {
+      doc.rect(leftMargin, headerY, pageWidth, 20).fill('#2563eb');
+      doc.fillColor('#ffffff').fontSize(7.5).font('Helvetica-Bold');
+
+      doc.text('SR', colSrX + 4, headerY + 5, { width: colSrW - 8, align: 'center' });
+      doc.text('ITEM CODE & DESCRIPTION', colDescX + 4, headerY + 5, { width: colDescW - 8, align: 'left' });
+      doc.text('BATCH / S.NO', colBatchX + 4, headerY + 5, { width: colBatchW - 8, align: 'left' });
+      doc.text('DISPATCHED', colDispX + 4, headerY + 5, { width: colDispW - 8, align: 'right' });
+      doc.text('DELIVERED', colDelivX + 4, headerY + 5, { width: colDelivW - 8, align: 'right' });
+
+      // Outer border for header
+      doc.rect(leftMargin, headerY, pageWidth, 20).strokeColor('#1d4ed8').lineWidth(0.5).stroke();
+
+      return headerY + 20;
+    };
+
+    // Helper: Continuation Header for subsequent pages
+    const renderContinuationHeader = (contY) => {
+      doc.fillColor(primaryColor).fontSize(10.5).font('Helvetica-Bold')
+        .text('DELIVERY CHALLAN (CONTINUED)', leftMargin, contY);
+      doc.font('Helvetica').fontSize(8).fillColor(textColor)
+        .text(`Challan No: ${challan.challanNumber}  |  Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, 300, contY, { align: 'right', width: 255 });
+      doc.moveTo(leftMargin, contY + 14).lineTo(leftMargin + pageWidth, contY + 14).strokeColor('#e2e8f0').lineWidth(1).stroke();
+      return contY + 20;
+    };
+
+    // --- PAGE 1 TOP HEADER ---
+    let headerStartY = 38;
+    if (companySettings.companyLogo && companySettings.companyLogo.startsWith('data:image')) {
+      try {
+        const base64Data = companySettings.companyLogo.split(';base64,').pop();
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        doc.image(imageBuffer, 40, 32, { height: 32 });
+        headerStartY = 68;
+      } catch (e) {
+        console.error('Failed to render PDF logo:', e.message);
+      }
+    }
+
+    if (headerStartY === 38) {
+      doc.fillColor(primaryColor).fontSize(15).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
+      doc.fillColor('#4b5563').fontSize(7.5).text(companySettings.tagline || 'Engineering & Logistics Division', 40, headerStartY + 18);
+      doc.text(companySettings.address || '', 40, headerStartY + 28, { width: 280, lineBreak: false, ellipsis: true });
+      doc.text(`Phone: ${companySettings.phone || ''} | Email: ${companySettings.email || ''}`, 40, headerStartY + 38);
+      doc.text(`GSTIN: ${companySettings.gstin || 'N/A'}`, 40, headerStartY + 48);
+    } else {
+      doc.fillColor(primaryColor).fontSize(12).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
+      doc.fillColor('#4b5563').fontSize(7.5).text(`${companySettings.address || ''} | Phone: ${companySettings.phone || ''} | GSTIN: ${companySettings.gstin || 'N/A'}`, 40, headerStartY + 14, { width: 280 });
+    }
+
+    // Document Title & Metadata
+    const metaX = 330;
+    const metaW = 225;
+    doc.fillColor(primaryColor).fontSize(14).font('Helvetica-Bold').text('DELIVERY CHALLAN', metaX, 36, { align: 'right', width: metaW });
+    doc.fillColor(textColor).fontSize(8.5).font('Helvetica-Bold').text(`Challan No: ${challan.challanNumber}`, metaX, 54, { align: 'right', width: metaW });
+    doc.font('Helvetica').fontSize(8).text(`Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, metaX, 66, { align: 'right', width: metaW });
+    doc.text(`Status: ${challan.status || 'Issued'}`, metaX, 78, { align: 'right', width: metaW });
+
+    const dividerY = 96;
+    doc.moveTo(leftMargin, dividerY).lineTo(leftMargin + pageWidth, dividerY).strokeColor('#e2e8f0').lineWidth(1).stroke();
 
     // Client & Consignee Box
     const client = challan.clientSnapshot || {};
-    doc.rect(40, 110, 250, 80).fillAndStroke('#f8fafc', '#cbd5e1');
-    doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('CONSIGNEE / CLIENT DETAILS', 48, 116);
-    doc.font('Helvetica').fontSize(8).fillColor(textColor);
-    doc.text(`Company: ${client.companyName || 'N/A'}`, 48, 130);
-    doc.text(`Attention: ${client.contactPerson || 'N/A'}`, 48, 142);
-    doc.text(`Phone: ${client.primaryPhone || 'N/A'}`, 48, 154);
-    doc.text(`Client GSTIN: ${client.gstin || 'Unregistered'}`, 48, 166);
+    const boxW = 252;
+    const boxH = 68;
+    const boxY = 102;
 
-    // Delivery & Transit Box
-    doc.rect(305, 110, 250, 80).fillAndStroke('#f8fafc', '#cbd5e1');
-    doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('DESTINATION & DISPATCH INFO', 313, 116);
-    doc.font('Helvetica').fontSize(8).fillColor(textColor);
-    doc.text(`Delivery Type: ${challan.deliveryType || 'Material Supply'}`, 313, 130);
-    doc.text(`Project/WO: ${challan.projectOrWorkOrder || 'N/A'}`, 313, 142);
-    doc.text(`Vehicle No: ${challan.vehicleNumber || 'N/A'}`, 313, 154);
-    doc.text(`Transporter: ${challan.transporterName || 'Direct Delivery'}`, 313, 166);
+    doc.rect(leftMargin, boxY, boxW, boxH).fillAndStroke('#f8fafc', borderColor);
+    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('CONSIGNEE / CLIENT DETAILS', leftMargin + 8, boxY + 6);
+    doc.font('Helvetica').fontSize(7.5).fillColor(textColor);
+    doc.text(`Company: ${client.companyName || 'N/A'}`, leftMargin + 8, boxY + 18, { width: boxW - 16, lineBreak: false, ellipsis: true });
+    doc.text(`Attention: ${client.contactPerson || 'N/A'}`, leftMargin + 8, boxY + 30, { width: boxW - 16, lineBreak: false, ellipsis: true });
+    doc.text(`Phone: ${client.primaryPhone || 'N/A'}`, leftMargin + 8, boxY + 42, { width: boxW - 16 });
+    doc.text(`Client GSTIN: ${client.gstin || 'Unregistered'}`, leftMargin + 8, boxY + 54, { width: boxW - 16 });
 
-    // Delivery Address
-    doc.rect(40, 196, 515, 24).fill('#eff6ff');
-    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('DELIVERY SITE ADDRESS:', 48, 203);
-    doc.font('Helvetica').fillColor(textColor).text(challan.deliveryAddress || 'Project Destination', 170, 203, { width: 380 });
+    // Destination & Dispatch Box
+    const box2X = leftMargin + boxW + 11;
+    doc.rect(box2X, boxY, boxW, boxH).fillAndStroke('#f8fafc', borderColor);
+    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('DESTINATION & DISPATCH INFO', box2X + 8, boxY + 6);
+    doc.font('Helvetica').fontSize(7.5).fillColor(textColor);
+    doc.text(`Delivery Type: ${challan.deliveryType || 'Material Supply'}`, box2X + 8, boxY + 18, { width: boxW - 16, lineBreak: false, ellipsis: true });
+    doc.text(`Project/WO: ${challan.projectOrWorkOrder || 'N/A'}`, box2X + 8, boxY + 30, { width: boxW - 16, lineBreak: false, ellipsis: true });
+    doc.text(`Vehicle No: ${challan.vehicleNumber || 'N/A'}`, box2X + 8, boxY + 42, { width: boxW - 16 });
+    doc.text(`Transporter: ${challan.transporterName || 'Direct Delivery'}`, box2X + 8, boxY + 54, { width: boxW - 16, lineBreak: false, ellipsis: true });
 
-    // Table Header
-    let tableY = 228;
-    doc.rect(40, tableY, 515, 20).fill('#2563eb');
-    doc.fillColor('#ffffff').fontSize(8.5).font('Helvetica-Bold');
-    doc.text('SR', 48, tableY + 5, { width: 25 });
-    doc.text('ITEM CODE & DESCRIPTION', 78, tableY + 5, { width: 230 });
-    doc.text('BATCH / S.NO', 315, tableY + 5, { width: 90 });
-    doc.text('QTY DISPATCHED', 415, tableY + 5, { width: 65, align: 'right' });
-    doc.text('QTY DELIVERED', 485, tableY + 5, { width: 65, align: 'right' });
+    // Delivery Address Card (dynamic height)
+    doc.font('Helvetica').fontSize(7.5);
+    const addrContent = (challan.deliveryAddress || client.shippingAddress || client.billingAddress || 'Project Destination').trim();
+    const addrTextW = 380;
+    const addrTextHeight = doc.heightOfString(addrContent, { width: addrTextW });
+    const addrCardH = Math.max(20, addrTextHeight + 8);
+    const addrCardY = boxY + boxH + 6;
 
-    tableY += 20;
+    doc.rect(leftMargin, addrCardY, pageWidth, addrCardH).fillAndStroke('#eff6ff', '#bfdbfe');
+    doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('DELIVERY SITE ADDRESS:', leftMargin + 8, addrCardY + 5);
+    doc.font('Helvetica').fillColor(textColor).text(addrContent, leftMargin + 125, addrCardY + 5, { width: addrTextW });
 
-    // Table Items
-    challan.items.forEach((item, index) => {
-      const rowBg = index % 2 === 0 ? '#ffffff' : '#f9fafb';
-      doc.rect(40, tableY, 515, 20).fill(rowBg);
-      doc.fillColor(textColor).fontSize(8).font('Helvetica');
+    // --- ITEM TABLE ---
+    let tableY = addrCardY + addrCardH + 8;
+    tableY = renderTableHeader(tableY);
 
-      doc.text(`${index + 1}`, 48, tableY + 5, { width: 25 });
-      doc.text(`${item.description} (${item.itemCode})`, 78, tableY + 5, { width: 230 });
-      doc.text(item.batchOrSerialNo || '-', 315, tableY + 5, { width: 90 });
-      doc.text(`${item.quantityDispatched} ${item.unit || ''}`, 415, tableY + 5, { width: 65, align: 'right' });
-      doc.text(`${item.quantityDelivered || 0} ${item.unit || ''}`, 485, tableY + 5, { width: 65, align: 'right' });
+    // Render items with dynamic row heights and automatic page wrapping
+    (challan.items || []).forEach((item, index) => {
+      // Calculate height needed for this row
+      doc.font('Helvetica').fontSize(7.5);
+      const descHeight = doc.heightOfString(item.description || '', { width: colDescW - 8 });
+      const codeHeight = item.itemCode ? 9 : 0;
+      const notesHeight = item.notes ? doc.heightOfString(`Note: ${item.notes}`, { width: colDescW - 8 }) + 2 : 0;
+      const contentHeight = descHeight + codeHeight + notesHeight;
+      const rowHeight = Math.max(20, contentHeight + 8);
 
-      tableY += 20;
+      // Check if row exceeds printable page area (max tableY ~ 700)
+      if (tableY + rowHeight > 700) {
+        doc.addPage();
+        let contY = 38;
+        contY = renderContinuationHeader(contY);
+        tableY = renderTableHeader(contY);
+      }
+
+      const rowBg = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+      doc.rect(leftMargin, tableY, pageWidth, rowHeight).fillAndStroke(rowBg, '#e2e8f0');
+
+      // SR
+      doc.fillColor(mutedColor).fontSize(7.5).font('Helvetica')
+        .text(`${index + 1}`, colSrX + 2, tableY + 5, { width: colSrW - 4, align: 'center' });
+
+      // Description & Code
+      let descY = tableY + 5;
+      doc.fillColor(textColor).fontSize(7.5).font('Helvetica-Bold')
+        .text(item.description || 'Material Item', colDescX + 4, descY, { width: colDescW - 8 });
+      descY += descHeight;
+
+      if (item.itemCode) {
+        doc.fillColor(mutedColor).fontSize(6.5).font('Helvetica')
+          .text(`Code: ${item.itemCode}`, colDescX + 4, descY, { width: colDescW - 8 });
+        descY += 9;
+      }
+      if (item.notes) {
+        doc.fillColor('#475569').fontSize(6.5).font('Helvetica-Oblique')
+          .text(`Note: ${item.notes}`, colDescX + 4, descY, { width: colDescW - 8 });
+      }
+
+      // Batch / Serial No
+      doc.fillColor(textColor).fontSize(7.5).font('Helvetica')
+        .text(item.batchOrSerialNo || '-', colBatchX + 4, tableY + 5, { width: colBatchW - 8, align: 'left', lineBreak: false, ellipsis: true });
+
+      // Dispatched Qty
+      doc.fillColor(textColor).fontSize(7.5).font('Helvetica-Bold')
+        .text(`${item.quantityDispatched} ${item.unit || ''}`, colDispX + 2, tableY + 5, { width: colDispW - 6, align: 'right' });
+
+      // Delivered Qty
+      const delivQty = item.quantityDelivered !== undefined && item.quantityDelivered !== null ? item.quantityDelivered : 0;
+      doc.fillColor(delivQty > 0 ? '#15803d' : mutedColor).fontSize(7.5).font('Helvetica-Bold')
+        .text(`${delivQty} ${item.unit || ''}`, colDelivX + 2, tableY + 5, { width: colDelivW - 6, align: 'right' });
+
+      tableY += rowHeight;
     });
 
-    // Terms & Acknowledgment
-    tableY += 15;
-    doc.rect(40, tableY, 515, 45).fillAndStroke('#f8fafc', '#cbd5e1');
-    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('TERMS & DELIVERY CONDITIONS:', 48, tableY + 7);
-    doc.font('Helvetica').fontSize(7.5).fillColor('#4b5563')
-      .text(challan.termsAndConditions || 'Materials received in good condition. Claims regarding discrepancy must be notified within 48 hours.', 48, tableY + 18, { width: 500 });
+    // Check if footer (Terms + Signatures ~ 85pt) fits on current page
+    const footerNeededHeight = 85;
+    if (tableY + footerNeededHeight > 750) {
+      doc.addPage();
+      let contY = 38;
+      contY = renderContinuationHeader(contY);
+      tableY = contY + 8;
+    } else {
+      tableY += 8;
+    }
 
-    // Signatures
-    const sigY = 700;
-    doc.moveTo(40, sigY).lineTo(180, sigY).strokeColor('#9ca3af').stroke();
-    doc.fontSize(8).fillColor('#64748b').text('Authorized Dispatch Signatory', 40, sigY + 5);
+    // Terms & Conditions Card
+    const termsY = tableY;
+    const termsH = 34;
+    doc.rect(leftMargin, termsY, pageWidth, termsH).fillAndStroke('#f8fafc', borderColor);
+    doc.fillColor(primaryColor).fontSize(7).font('Helvetica-Bold').text('TERMS & DELIVERY CONDITIONS:', leftMargin + 8, termsY + 5);
+    doc.font('Helvetica').fontSize(7).fillColor('#475569')
+      .text(challan.termsAndConditions || 'Materials received in good condition. Claims regarding discrepancy or transit damage must be notified within 48 hours.', leftMargin + 8, termsY + 16, { width: pageWidth - 16 });
 
-    doc.moveTo(375, sigY).lineTo(555, sigY).strokeColor('#9ca3af').stroke();
-    doc.fontSize(8).text('Receiver Signature & Site Stamp', 375, sigY + 5, { align: 'right' });
+    // Signatures Block
+    const sigY = termsY + termsH + 26;
+    doc.moveTo(leftMargin, sigY).lineTo(leftMargin + 160, sigY).strokeColor('#94a3b8').lineWidth(0.8).stroke();
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#475569').text('Authorized Dispatch Signatory', leftMargin, sigY + 4);
+    doc.fontSize(7).font('Helvetica').fillColor(mutedColor).text(`For ${companySettings.companyName || 'Navadurga Electricals'}`, leftMargin, sigY + 14);
+
+    const sig2X = leftMargin + pageWidth - 160;
+    doc.moveTo(sig2X, sigY).lineTo(leftMargin + pageWidth, sigY).strokeColor('#94a3b8').lineWidth(0.8).stroke();
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#475569').text('Receiver Signature & Site Stamp', sig2X, sigY + 4, { align: 'right', width: 160 });
+    doc.fontSize(7).font('Helvetica').fillColor(mutedColor).text('Received in good order & condition', sig2X, sigY + 14, { align: 'right', width: 160 });
+
+    // Page Numbering Footer on all pages (placed safely at Y=780 within bottom margin boundary)
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.fontSize(7).font('Helvetica').fillColor('#94a3b8')
+        .text(`Delivery Challan ${challan.challanNumber}  |  Page ${i + 1} of ${range.count}`, leftMargin, 782, { align: 'center', width: pageWidth, lineBreak: false });
+    }
 
     doc.end();
   } catch (error) {
