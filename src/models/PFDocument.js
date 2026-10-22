@@ -169,6 +169,16 @@ const pfDocumentSchema = new mongoose.Schema(
       required: true,
       min: 0
     },
+    advanceAmount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    balancePayable: {
+      type: Number,
+      default: undefined,
+      min: 0
+    },
     notes: {
       type: String,
       trim: true

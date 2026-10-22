@@ -92,6 +92,7 @@ exports.createPFDocument = async (req, res, next) => {
       validityDate,
       items,
       documentDiscount = 0,
+      advanceAmount = 0,
       notes,
       termsAndConditions,
       assignedEmployee
@@ -119,6 +120,23 @@ exports.createPFDocument = async (req, res, next) => {
 
     // Backend authoritative calculations
     const totals = calculateDocumentTotals(items, documentDiscount, isInterState, companySettings.roundingPolicy !== 'none');
+    const parsedAdvanceAmount = Number(advanceAmount);
+    if (
+      !Number.isFinite(parsedAdvanceAmount)
+      || parsedAdvanceAmount < 0
+      || advanceAmount === null
+      || advanceAmount === ''
+      || Math.abs(parsedAdvanceAmount * 100 - Math.round(parsedAdvanceAmount * 100)) > 1e-7
+    ) {
+      return res.status(400).json({ success: false, message: 'Advance amount must be a non-negative currency amount with up to two decimal places' });
+    }
+    const roundedAdvanceAmount = Math.round((parsedAdvanceAmount + Number.EPSILON) * 100) / 100;
+    if (roundedAdvanceAmount > totals.grandTotal) {
+      return res.status(400).json({
+        success: false,
+        message: `Advance amount cannot exceed PF Grand Total (${totals.grandTotal})`
+      });
+    }
 
     // Generate atomic sequential PF number
     const prefix = companySettings.pfPrefix || 'PF-2026-';
@@ -163,16 +181,18 @@ exports.createPFDocument = async (req, res, next) => {
       totalTax: totals.totalTax,
       roundOffAdjustment: totals.roundOffAdjustment,
       grandTotal: totals.grandTotal,
+      advanceAmount: roundedAdvanceAmount,
+      balancePayable: Math.max(0, Math.round((totals.grandTotal - roundedAdvanceAmount + Number.EPSILON) * 100) / 100),
       notes: notes || companySettings.defaultNotes,
       termsAndConditions: termsAndConditions || companySettings.defaultPaymentTerms,
-      status: 'Draft',
+      status: 'Issued',
       createdBy: req.user._id
     });
 
     res.status(201).json({
       success: true,
       data: newPF,
-      message: 'PF Document created successfully'
+      message: 'PF Document issued successfully'
     });
   } catch (error) {
     next(error);
@@ -212,6 +232,7 @@ exports.updatePFDocument = async (req, res, next) => {
       notes,
       termsAndConditions,
       status,
+      advanceAmount,
       assignedEmployee
     } = req.body;
 
@@ -220,6 +241,7 @@ exports.updatePFDocument = async (req, res, next) => {
     const companyStateCode = (companySettings.stateCode || '09').trim();
     const isInterState = Boolean(clientStateCode && companyStateCode && clientStateCode !== companyStateCode);
 
+    let updatedGrandTotal = pf.grandTotal;
     if (items && items.length > 0) {
       const totals = calculateDocumentTotals(items, documentDiscount !== undefined ? documentDiscount : pf.documentDiscount, isInterState, companySettings.roundingPolicy !== 'none');
       pf.items = totals.items;
@@ -232,7 +254,30 @@ exports.updatePFDocument = async (req, res, next) => {
       pf.totalTax = totals.totalTax;
       pf.roundOffAdjustment = totals.roundOffAdjustment;
       pf.grandTotal = totals.grandTotal;
+      updatedGrandTotal = totals.grandTotal;
     }
+
+    const parsedAdvanceAmount = advanceAmount === undefined
+      ? Number(pf.advanceAmount || 0)
+      : Number(advanceAmount);
+    if (
+      !Number.isFinite(parsedAdvanceAmount)
+      || parsedAdvanceAmount < 0
+      || advanceAmount === null
+      || (advanceAmount !== undefined && advanceAmount === '')
+      || Math.abs(parsedAdvanceAmount * 100 - Math.round(parsedAdvanceAmount * 100)) > 1e-7
+    ) {
+      return res.status(400).json({ success: false, message: 'Advance amount must be a non-negative currency amount with up to two decimal places' });
+    }
+    const roundedAdvanceAmount = Math.round((parsedAdvanceAmount + Number.EPSILON) * 100) / 100;
+    if (roundedAdvanceAmount > updatedGrandTotal) {
+      return res.status(400).json({
+        success: false,
+        message: `Advance amount cannot exceed PF Grand Total (${updatedGrandTotal})`
+      });
+    }
+    pf.advanceAmount = roundedAdvanceAmount;
+    pf.balancePayable = Math.max(0, Math.round((updatedGrandTotal - roundedAdvanceAmount + Number.EPSILON) * 100) / 100);
 
     if (documentDate) pf.documentDate = documentDate;
     if (validityDate !== undefined) pf.validityDate = validityDate;
@@ -399,4 +444,3 @@ exports.deletePFDocument = async (req, res, next) => {
     next(error);
   }
 };
-

@@ -8,6 +8,7 @@ const DeliveryChallan = require('../src/models/DeliveryChallan');
 const Client = require('../src/models/Client');
 const User = require('../src/models/User');
 const { Writable } = require('stream');
+const zlib = require('node:zlib');
 
 describe('Delivery Challan Creation & Validation Suite', () => {
   let dbUri;
@@ -250,6 +251,17 @@ describe('Delivery Challan Creation & Validation Suite', () => {
     const pdfBuffer = Buffer.concat(chunks);
     assert.ok(pdfBuffer.length > 500, 'PDF buffer should be non-empty and greater than 500 bytes');
     assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF', 'PDF buffer must start with %PDF magic number');
+    const pdfContent = pdfBuffer.toString('latin1');
+    const decodedStreams = [...pdfContent.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
+      .map((match) => {
+        try {
+          return zlib.inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1');
+        } catch {
+          return '';
+        }
+      })
+      .join('\n');
+    assert.ok(!decodedStreams.includes('Attention:'), 'Delivery Challan PDF should not include the Attention line');
 
     // Count pages in PDF buffer: single item challan must strictly be 1 page!
     const pageMatches = pdfBuffer.toString().match(/\/Type\s*\/Page[^s]/g);
@@ -314,4 +326,3 @@ describe('Delivery Challan Creation & Validation Suite', () => {
     assert.ok((multiPageMatches?.length || 0) > 1, 'Multi-row challan should span cleanly across multiple pages');
   });
 });
-

@@ -728,19 +728,453 @@ exports.recordSalaryPayment = async (req, res, next) => {
   }
 };
 
-// @desc    Download Official Employee Payslip PDF
-// @route   GET /api/payroll/:id/payslip/:employeeId/pdf
-// @access  Private
-exports.downloadPayslipPDF = async (req, res, next) => {
+// @desc    Calculate / Preview Single Employee Salary
+// @route   POST /api/payroll/calculate-employee
+// @access  Private (Administrator, Finance)
+exports.calculateEmployeeSalary = async (req, res, next) => {
   try {
-    const run = await PayrollRun.findById(req.params.id);
-    if (!run) {
-      return res.status(404).json({ success: false, message: 'Payroll run not found' });
+    const { employeeId, month, year, totalWorkingDays, paidDays, bonusOrIncentive, overtimeAmount, tdsDeduction, otherDeductions, salaryOverrides } = req.body;
+
+    const numMonth = parseMonthNumber(month);
+    const numYear = Number(year);
+
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: 'Employee ID is required' });
     }
 
-    const item = run.items.find(i => i.employee.toString() === req.params.employeeId || i.employeeId === req.params.employeeId);
+    if (!numMonth || !numYear || numMonth < 1 || numMonth > 12) {
+      return res.status(400).json({ success: false, message: 'Valid month (1-12) and year are required' });
+    }
+
+    // Lookup employee by employeeId or ObjectId
+    let employee;
+    if (mongoose.isValidObjectId(employeeId)) {
+      employee = await Employee.findById(employeeId);
+    }
+    if (!employee) {
+      employee = await Employee.findOne({ employeeId: String(employeeId).trim() });
+    }
+
+    if (!employee) {
+      return res.status(404).json({ success: false, message: `Employee with ID "${employeeId}" not found.` });
+    }
+
+    if (employee.employmentStatus === 'Inactive' || employee.employmentStatus === 'Terminated') {
+      return res.status(400).json({
+        success: false,
+        message: `Employee "${employee.fullName}" is marked as ${employee.employmentStatus}. Inactive employees cannot be processed for new payroll periods.`
+      });
+    }
+
+    // Validate salary structure exists
+    const s = employee.salaryStructure || {};
+    const totalConfigured = (Number(s.basicSalary) || 0) + (Number(s.hra) || 0) + (Number(s.conveyanceAllowance) || 0) + (Number(s.specialAllowance) || 0) + (Number(s.medicalAllowance) || 0) + (Number(s.otherAllowances) || 0);
+    if (totalConfigured <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Employee "${employee.fullName}" (${employee.employeeId}) has no configured salary structure. Please set up salary details in the employee profile first.`
+      });
+    }
+
+    // Clone employee object for period calculation without modifying DB
+    const empData = employee.toObject();
+    if (salaryOverrides && typeof salaryOverrides === 'object') {
+      empData.salaryStructure = {
+        ...empData.salaryStructure,
+        basicSalary: salaryOverrides.basicSalary !== undefined ? Number(salaryOverrides.basicSalary) : empData.salaryStructure.basicSalary,
+        hra: salaryOverrides.hra !== undefined ? Number(salaryOverrides.hra) : empData.salaryStructure.hra,
+        conveyanceAllowance: salaryOverrides.conveyanceAllowance !== undefined ? Number(salaryOverrides.conveyanceAllowance) : empData.salaryStructure.conveyanceAllowance,
+        specialAllowance: salaryOverrides.specialAllowance !== undefined ? Number(salaryOverrides.specialAllowance) : empData.salaryStructure.specialAllowance,
+        medicalAllowance: salaryOverrides.medicalAllowance !== undefined ? Number(salaryOverrides.medicalAllowance) : empData.salaryStructure.medicalAllowance,
+        otherAllowances: salaryOverrides.otherAllowances !== undefined ? Number(salaryOverrides.otherAllowances) : empData.salaryStructure.otherAllowances,
+        professionalTax: salaryOverrides.professionalTax !== undefined ? Number(salaryOverrides.professionalTax) : empData.salaryStructure.professionalTax
+      };
+    }
+
+    const companySettings = await CompanySettings.findOne() || {};
+    const periodStart = new Date(Date.UTC(numYear, numMonth - 1, 1, 0, 0, 0, 0));
+    const periodEnd = new Date(Date.UTC(numYear, numMonth, 0, 23, 59, 59, 999));
+    const statutoryRules = companySettings.statutoryPayrollRules || {};
+
+    const workDays = Number(totalWorkingDays) > 0 ? Number(totalWorkingDays) : 30;
+    const payable = paidDays !== undefined && Number(paidDays) >= 0 ? Math.min(workDays, Number(paidDays)) : workDays;
+
+    const daysConfig = {
+      totalWorkingDays: workDays,
+      paidDays: payable,
+      bonusOrIncentive: Number(bonusOrIncentive) || 0,
+      overtimeAmount: Number(overtimeAmount) || 0,
+      tdsDeduction: tdsDeduction !== undefined ? Number(tdsDeduction) : (Number(empData.salaryStructure?.tdsMonthly ?? empData.salaryStructure?.tdsEstimate) || 0),
+      otherDeductions: Number(otherDeductions) || 0
+    };
+
+    const calculatedItem = calculateEmployeePayrollItem(empData, daysConfig, statutoryRules, {
+      startDate: periodStart,
+      endDate: periodEnd
+    });
+
+    // Check if payroll run or payslip already exists for this employee + period
+    const existingRun = await PayrollRun.findOne({ month: numMonth, year: numYear });
+    let existingItem = null;
+    let isAlreadyFinalized = false;
+    if (existingRun) {
+      existingItem = existingRun.items.find(i => i.employee.toString() === employee._id.toString() || i.employeeId === employee.employeeId);
+      isAlreadyFinalized = existingRun.status === 'Finalized';
+    }
+
+    res.status(200).json({
+      success: true,
+      periodName: `${MONTH_NAMES[numMonth]} ${numYear}`,
+      month: numMonth,
+      year: numYear,
+      isAlreadyFinalized,
+      existingRunId: existingRun?._id || null,
+      existingRunCode: existingRun?.payrollCode || null,
+      existingItem: existingItem || null,
+      calculated: calculatedItem,
+      netSalaryInWords: numberToWordsINR(calculatedItem.netSalaryPayable)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Saved Employee Payslip by Employee ID, Month, and Year
+// @route   GET /api/payroll/employee-payslip
+// @access  Private
+exports.getEmployeePayslip = async (req, res, next) => {
+  try {
+    const { employeeId, month, year } = req.query;
+
+    if (!employeeId || !month || !year) {
+      return res.status(400).json({ success: false, message: 'employeeId, month, and year are required' });
+    }
+
+    const numMonth = parseMonthNumber(month);
+    const numYear = Number(year);
+
+    const run = await PayrollRun.findOne({ month: numMonth, year: numYear });
+    if (!run) {
+      return res.status(200).json({
+        success: true,
+        data: null,
+        message: `No payroll records found for ${MONTH_NAMES[numMonth]} ${numYear}`
+      });
+    }
+
+    const item = run.items.find(i => i.employee.toString() === employeeId || i.employeeId === employeeId);
     if (!item) {
-      return res.status(404).json({ success: false, message: 'Payslip item not found' });
+      return res.status(200).json({
+        success: true,
+        data: null,
+        message: `No saved payslip found for this employee in ${MONTH_NAMES[numMonth]} ${numYear}`
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: item,
+      runId: run._id,
+      payrollCode: run.payrollCode,
+      status: run.status,
+      periodName: run.periodName,
+      netSalaryInWords: numberToWordsINR(item.netSalaryPayable)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Save or Finalize Individual Employee Payslip
+// @route   POST /api/payroll/employee-payslip
+// @access  Private (Administrator)
+exports.saveEmployeePayslip = async (req, res, next) => {
+  try {
+    const {
+      employeeId,
+      month,
+      year,
+      status = 'Draft',
+      totalWorkingDays,
+      paidDays,
+      bonusOrIncentive,
+      overtimeAmount,
+      tdsDeduction,
+      otherDeductions,
+      salaryOverrides,
+      remarks
+    } = req.body;
+
+    const numMonth = parseMonthNumber(month);
+    const numYear = Number(year);
+
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: 'Employee ID is required' });
+    }
+
+    if (!numMonth || !numYear || numMonth < 1 || numMonth > 12) {
+      return res.status(400).json({ success: false, message: 'Valid month (1-12) and year are required' });
+    }
+
+    // Lookup employee
+    let employee;
+    if (mongoose.isValidObjectId(employeeId)) {
+      employee = await Employee.findById(employeeId);
+    }
+    if (!employee) {
+      employee = await Employee.findOne({ employeeId: String(employeeId).trim() });
+    }
+
+    if (!employee) {
+      return res.status(404).json({ success: false, message: `Employee with ID "${employeeId}" not found.` });
+    }
+
+    if (employee.employmentStatus === 'Inactive' || employee.employmentStatus === 'Terminated') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot generate payslip for ${employee.employmentStatus} employee.`
+      });
+    }
+
+    let run = await PayrollRun.findOne({ month: numMonth, year: numYear });
+
+    // Check if whole run is already finalized and prevented from editing
+    if (run && run.status === 'Finalized') {
+      const existingItem = run.items.find(i => i.employee.toString() === employee._id.toString() || i.employeeId === employee.employeeId);
+      if (existingItem) {
+        return res.status(400).json({
+          success: false,
+          message: `Payslip for ${employee.fullName} (${employee.employeeId}) for ${MONTH_NAMES[numMonth]} ${numYear} has already been finalized under ${run.payrollCode}. To prevent duplicate or conflicting statutory filings, finalized records cannot be overwritten.`,
+          existingItem,
+          runId: run._id
+        });
+      }
+    }
+
+    const companySettings = await CompanySettings.findOne() || {};
+    const periodStart = new Date(Date.UTC(numYear, numMonth - 1, 1, 0, 0, 0, 0));
+    const periodEnd = new Date(Date.UTC(numYear, numMonth, 0, 23, 59, 59, 999));
+    const statutoryRules = companySettings.statutoryPayrollRules || {};
+
+    const workDays = Number(totalWorkingDays) > 0 ? Number(totalWorkingDays) : 30;
+    const payable = paidDays !== undefined && Number(paidDays) >= 0 ? Math.min(workDays, Number(paidDays)) : workDays;
+
+    const empData = employee.toObject();
+    if (salaryOverrides && typeof salaryOverrides === 'object') {
+      empData.salaryStructure = {
+        ...empData.salaryStructure,
+        basicSalary: salaryOverrides.basicSalary !== undefined ? Number(salaryOverrides.basicSalary) : empData.salaryStructure.basicSalary,
+        hra: salaryOverrides.hra !== undefined ? Number(salaryOverrides.hra) : empData.salaryStructure.hra,
+        conveyanceAllowance: salaryOverrides.conveyanceAllowance !== undefined ? Number(salaryOverrides.conveyanceAllowance) : empData.salaryStructure.conveyanceAllowance,
+        specialAllowance: salaryOverrides.specialAllowance !== undefined ? Number(salaryOverrides.specialAllowance) : empData.salaryStructure.specialAllowance,
+        medicalAllowance: salaryOverrides.medicalAllowance !== undefined ? Number(salaryOverrides.medicalAllowance) : empData.salaryStructure.medicalAllowance,
+        otherAllowances: salaryOverrides.otherAllowances !== undefined ? Number(salaryOverrides.otherAllowances) : empData.salaryStructure.otherAllowances,
+        professionalTax: salaryOverrides.professionalTax !== undefined ? Number(salaryOverrides.professionalTax) : empData.salaryStructure.professionalTax
+      };
+    }
+
+    const daysConfig = {
+      totalWorkingDays: workDays,
+      paidDays: payable,
+      bonusOrIncentive: Number(bonusOrIncentive) || 0,
+      overtimeAmount: Number(overtimeAmount) || 0,
+      tdsDeduction: tdsDeduction !== undefined ? Number(tdsDeduction) : (Number(empData.salaryStructure?.tdsMonthly ?? empData.salaryStructure?.tdsEstimate) || 0),
+      otherDeductions: Number(otherDeductions) || 0
+    };
+
+    const calculatedItem = calculateEmployeePayrollItem(empData, daysConfig, statutoryRules, {
+      startDate: periodStart,
+      endDate: periodEnd
+    });
+
+    if (remarks) {
+      calculatedItem.remarks = remarks;
+    }
+
+    if (calculatedItem.netSalaryPayable < 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Deductions exceed gross earnings for ${calculatedItem.employeeName}. Net salary cannot be negative.`
+      });
+    }
+
+    const periodName = `${MONTH_NAMES[numMonth]} ${numYear}`;
+
+    // Create run if it doesn't exist
+    if (!run) {
+      const prefix = companySettings?.payrollPrefix || 'PAY-2026-';
+      const seq = await getNextSequence('payrollRunId');
+      const payrollCode = `${prefix}${String(seq).padStart(4, '0')}`;
+
+      run = new PayrollRun({
+        payrollCode,
+        month: numMonth,
+        year: numYear,
+        periodName,
+        status: status === 'Finalized' ? 'Finalized' : 'Draft',
+        items: [calculatedItem],
+        createdBy: req.user._id
+      });
+    } else {
+      // Upsert the employee item inside run.items
+      const existingIdx = run.items.findIndex(
+        i => i.employee.toString() === employee._id.toString() || i.employeeId === employee.employeeId
+      );
+      if (existingIdx >= 0) {
+        // Preserve existing payment status if already paid
+        const currentItem = run.items[existingIdx];
+        if (currentItem.paymentStatus === 'Paid') {
+          calculatedItem.paymentStatus = 'Paid';
+          calculatedItem.paymentDate = currentItem.paymentDate;
+          calculatedItem.paymentMethod = currentItem.paymentMethod;
+          calculatedItem.paymentReference = currentItem.paymentReference;
+        }
+        run.items[existingIdx] = calculatedItem;
+      } else {
+        run.items.push(calculatedItem);
+      }
+    }
+
+    // Recompute run totals from all items
+    run.totalEmployees = run.items.length;
+    run.totalGrossEarnings = round2(run.items.reduce((acc, i) => acc + (Number(i.grossEarnings) || 0), 0));
+    run.totalEmployeePf = round2(run.items.reduce((acc, i) => acc + (Number(i.employeePfContribution) || 0), 0));
+    run.totalEmployerPf = round2(run.items.reduce((acc, i) => acc + (Number(i.employerPfContribution) || 0), 0));
+    run.totalEmployeeEsi = round2(run.items.reduce((acc, i) => acc + (Number(i.employeeEsiContribution) || 0), 0));
+    run.totalEmployerEsi = round2(run.items.reduce((acc, i) => acc + (Number(i.employerEsiContribution) || 0), 0));
+    run.totalPfContribution = round2(run.totalEmployeePf + run.totalEmployerPf);
+    run.totalProfessionalTax = round2(run.items.reduce((acc, i) => acc + (Number(i.professionalTax) || 0), 0));
+    run.totalTdsDeductions = round2(run.items.reduce((acc, i) => acc + (Number(i.tdsDeduction) || 0), 0));
+    run.totalDeductions = round2(run.items.reduce((acc, i) => acc + (Number(i.totalEmployeeDeductions) || 0), 0));
+    run.totalNetPayable = round2(run.items.reduce((acc, i) => acc + (Number(i.netSalaryPayable) || 0), 0));
+    run.totalEmployerCost = round2(run.items.reduce((acc, i) => acc + (Number(i.employerCostTotal) || 0), 0));
+    run.totalAmountPaid = round2(run.items.reduce((acc, i) => acc + (i.paymentStatus === 'Paid' ? (Number(i.netSalaryPayable) || 0) : 0), 0));
+    run.totalPendingAmount = round2(run.totalNetPayable - run.totalAmountPaid);
+    run.paymentStatus = (run.totalAmountPaid >= run.totalNetPayable && run.totalNetPayable > 0)
+      ? 'Paid'
+      : (run.totalAmountPaid > 0 ? 'Partially Paid' : 'Pending');
+
+    if (status === 'Finalized') {
+      run.status = 'Finalized';
+      run.finalizedAt = new Date();
+      run.finalizedBy = req.user._id;
+
+      // Create / update statutory PF record if PF is applicable
+      if (calculatedItem.employeePfContribution > 0 || calculatedItem.employerPfContribution > 0) {
+        const recCode = `PF-${numYear}-${String(numMonth).padStart(2, '0')}-${calculatedItem.employeeId}`;
+        const epsCont = calculatedItem.epsContribution !== undefined ? Number(calculatedItem.epsContribution) : 0;
+        const epfDiff = calculatedItem.epfDifference !== undefined ? Number(calculatedItem.epfDifference) : round2(Math.max(0, (Number(calculatedItem.employerPfContribution) || 0) - epsCont));
+
+        await EmployeePfRecord.findOneAndUpdate(
+          { employee: employee._id, month: numMonth, year: numYear },
+          {
+            recordCode: recCode,
+            employee: employee._id,
+            employeeId: calculatedItem.employeeId,
+            employeeName: calculatedItem.employeeName,
+            uan: calculatedItem.uan,
+            pfAccountNumber: calculatedItem.pfAccountNumber,
+            payrollRun: run._id,
+            month: numMonth,
+            year: numYear,
+            periodName,
+            pfWageBase: calculatedItem.pfWageBase,
+            employeeContribution: calculatedItem.employeePfContribution,
+            employerContribution: calculatedItem.employerPfContribution,
+            epsContribution: epsCont,
+            epfDifference: epfDiff,
+            totalPfAmount: round2(calculatedItem.employeePfContribution + calculatedItem.employerPfContribution),
+            remittanceStatus: 'Pending'
+          },
+          { upsert: true, new: true }
+        );
+      }
+    }
+
+    await run.save();
+
+    res.status(200).json({
+      success: true,
+      message: status === 'Finalized'
+        ? `Payslip for ${calculatedItem.employeeName} finalized successfully.`
+        : `Payslip draft for ${calculatedItem.employeeName} saved successfully.`,
+      data: calculatedItem,
+      runId: run._id,
+      payrollCode: run.payrollCode,
+      status: run.status
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Download Official Employee Payslip PDF
+// @route   GET /api/payroll/:id/payslip/:employeeId/pdf or /api/payroll/payslip-pdf
+// @access  Private
+exports.downloadPayslipPDF = async (req, res, next) => {
+  return exports.downloadPayslipPDFDirect(req, res, next);
+};
+
+// @desc    Download Employee Payslip PDF directly by Employee ID and Period
+// @route   GET /api/payroll/payslip-pdf
+// @access  Private
+exports.downloadPayslipPDFDirect = async (req, res, next) => {
+  try {
+    const employeeId = req.query.employeeId || req.params.employeeId;
+    const runId = req.query.runId || req.params.id;
+    const month = req.query.month;
+    const year = req.query.year;
+
+    let run = null;
+    let item = null;
+
+    if (runId && mongoose.isValidObjectId(runId)) {
+      run = await PayrollRun.findById(runId);
+      if (run && employeeId) {
+        item = run.items.find(i => i.employee.toString() === employeeId || i.employeeId === employeeId);
+      }
+    }
+
+    if (!item && employeeId && month && year) {
+      const numMonth = parseMonthNumber(month);
+      const numYear = Number(year);
+      run = await PayrollRun.findOne({ month: numMonth, year: numYear });
+      if (run) {
+        item = run.items.find(i => i.employee.toString() === employeeId || i.employeeId === employeeId);
+      }
+    }
+
+    // If still not found in a saved run, compute a temporary preview payslip for printing
+    if (!item) {
+      const numMonth = parseMonthNumber(month) || (new Date().getMonth() + 1);
+      const numYear = Number(year) || new Date().getFullYear();
+
+      let emp = null;
+      if (mongoose.isValidObjectId(employeeId)) {
+        emp = await Employee.findById(employeeId);
+      }
+      if (!emp && employeeId) {
+        emp = await Employee.findOne({ employeeId: String(employeeId).trim() });
+      }
+
+      if (!emp) {
+        return res.status(404).json({ success: false, message: 'Employee payslip record not found' });
+      }
+
+      const companySettings = await CompanySettings.findOne() || {};
+      const periodStart = new Date(Date.UTC(numYear, numMonth - 1, 1, 0, 0, 0, 0));
+      const periodEnd = new Date(Date.UTC(numYear, numMonth, 0, 23, 59, 59, 999));
+      item = calculateEmployeePayrollItem(emp, {}, companySettings.statutoryPayrollRules || {}, {
+        startDate: periodStart,
+        endDate: periodEnd
+      });
+
+      run = {
+        periodName: `${MONTH_NAMES[numMonth]} ${numYear}`,
+        payrollCode: 'PREVIEW-ONLY',
+        month: numMonth,
+        year: numYear
+      };
     }
 
     const companySettings = await CompanySettings.findOne() || {};
@@ -761,7 +1195,7 @@ exports.downloadPayslipPDF = async (req, res, next) => {
     doc.fillColor(primaryColor).fontSize(14).text('SALARY PAYSLIP', 380, 40, { align: 'right', bold: true });
     doc.fillColor(textColor).fontSize(9.5).text(`Pay Period: ${run.periodName}`, 380, 58, { align: 'right' });
     doc.text(`Payroll Ref: ${run.payrollCode}`, 380, 72, { align: 'right' });
-    doc.text(`Disbursement: ${item.paymentStatus}`, 380, 86, { align: 'right' });
+    doc.text(`Disbursement: ${item.paymentStatus || 'Pending'}`, 380, 86, { align: 'right' });
 
     doc.moveTo(40, 105).lineTo(555, 105).strokeColor('#e2e8f0').lineWidth(1).stroke();
 
@@ -769,13 +1203,17 @@ exports.downloadPayslipPDF = async (req, res, next) => {
     doc.rect(40, 115, 515, 75).fillAndStroke('#f8fafc', '#cbd5e1');
     doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('EMPLOYEE CREDENTIALS & WORK RECORD', 48, 122);
     
+    // Mask bank account for privacy
+    const rawAcc = String(item.bankAccount || '');
+    const maskedAcc = rawAcc.length > 4 ? `•••• •••• ${rawAcc.slice(-4)}` : (rawAcc || 'On File');
+
     doc.font('Helvetica').fontSize(8).fillColor(textColor);
     doc.text(`Employee ID: ${item.employeeId}`, 48, 138);
     doc.text(`Full Name: ${item.employeeName}`, 48, 150);
     doc.text(`Department: ${item.department || 'Engineering'}`, 48, 162);
     doc.text(`Designation: ${item.designation || 'Specialist'}`, 48, 174);
 
-    doc.text(`Bank A/C: ${item.bankAccount || 'On File'}`, 230, 138);
+    doc.text(`Bank A/C: ${maskedAcc}`, 230, 138);
     doc.text(`Bank Name: ${item.bankName || 'HDFC Bank'}`, 230, 150);
     doc.text(`IFSC Code: ${item.ifscCode || 'N/A'}`, 230, 162);
     doc.text(`PAN Number: ${item.panNumber || 'N/A'}`, 230, 174);
@@ -815,7 +1253,7 @@ exports.downloadPayslipPDF = async (req, res, next) => {
       { label: 'Employee ESI Contribution', val: item.employeeEsiContribution },
       { label: 'Professional Tax (PT)', val: item.professionalTax },
       { label: 'TDS / Income Tax Withheld', val: item.tdsDeduction },
-      { label: 'Other Voluntary Deductions', val: item.otherDeductions },
+      { label: 'Other Deductions / LOP', val: item.otherDeductions },
       { label: '-', val: 0 },
       { label: '-', val: 0 }
     ];
@@ -853,11 +1291,16 @@ exports.downloadPayslipPDF = async (req, res, next) => {
     tableY += 30;
 
     // Net Salary Callout Box
-    doc.rect(40, tableY, 515, 45).fillAndStroke('#ecfdf5', '#10b981');
-    doc.fillColor('#065f46').fontSize(10).font('Helvetica-Bold').text('NET TAKE-HOME SALARY PAYABLE:', 55, tableY + 10);
-    doc.fontSize(16).text(`Rs. ${formatNum(item.netSalaryPayable)}`, 55, tableY + 23);
+    doc.rect(40, tableY, 515, 48).fillAndStroke('#ecfdf5', '#10b981');
+    doc.fillColor('#065f46').fontSize(10).font('Helvetica-Bold')
+      .text('NET TAKE-HOME SALARY PAYABLE:', 55, tableY + 7, { width: 340, lineBreak: false });
+    doc.fontSize(12).text(`Rs. ${formatNum(item.netSalaryPayable)}`, 395, tableY + 6, {
+      width: 145,
+      align: 'right',
+      lineBreak: false
+    });
     doc.fontSize(8.5).font('Helvetica-Oblique').fillColor('#047857')
-      .text(`(In Words: ${numberToWordsINR(item.netSalaryPayable)})`, 240, tableY + 16, { width: 300 });
+      .text(`In Words: ${numberToWordsINR(item.netSalaryPayable)}`, 55, tableY + 28, { width: 485 });
 
     // Employer Contribution Note
     tableY += 60;

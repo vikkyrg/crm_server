@@ -467,16 +467,15 @@ exports.downloadChallanPDF = async (req, res, next) => {
     // Client & Consignee Box
     const client = challan.clientSnapshot || {};
     const boxW = 252;
-    const boxH = 68;
+    const boxH = 56;
     const boxY = 102;
 
     doc.rect(leftMargin, boxY, boxW, boxH).fillAndStroke('#f8fafc', borderColor);
     doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('CONSIGNEE / CLIENT DETAILS', leftMargin + 8, boxY + 6);
     doc.font('Helvetica').fontSize(7.5).fillColor(textColor);
     doc.text(`Company: ${client.companyName || 'N/A'}`, leftMargin + 8, boxY + 18, { width: boxW - 16, lineBreak: false, ellipsis: true });
-    doc.text(`Attention: ${client.contactPerson || 'N/A'}`, leftMargin + 8, boxY + 30, { width: boxW - 16, lineBreak: false, ellipsis: true });
-    doc.text(`Phone: ${client.primaryPhone || 'N/A'}`, leftMargin + 8, boxY + 42, { width: boxW - 16 });
-    doc.text(`Client GSTIN: ${client.gstin || 'Unregistered'}`, leftMargin + 8, boxY + 54, { width: boxW - 16 });
+    doc.text(`Phone: ${client.primaryPhone || 'N/A'}`, leftMargin + 8, boxY + 30, { width: boxW - 16 });
+    doc.text(`Client GSTIN: ${client.gstin || 'Unregistered'}`, leftMargin + 8, boxY + 42, { width: boxW - 16 });
 
     // Destination & Dispatch Box
     const box2X = leftMargin + boxW + 11;
@@ -551,12 +550,12 @@ exports.downloadChallanPDF = async (req, res, next) => {
 
       // Dispatched Qty
       doc.fillColor(textColor).fontSize(7.5).font('Helvetica-Bold')
-        .text(`${item.quantityDispatched} ${item.unit || ''}`, colDispX + 2, tableY + 5, { width: colDispW - 6, align: 'right' });
+        .text(`${item.quantityDispatched}`, colDispX + 2, tableY + 5, { width: colDispW - 6, align: 'right' });
 
       // Delivered Qty
       const delivQty = item.quantityDelivered !== undefined && item.quantityDelivered !== null ? item.quantityDelivered : 0;
       doc.fillColor(delivQty > 0 ? '#15803d' : mutedColor).fontSize(7.5).font('Helvetica-Bold')
-        .text(`${delivQty} ${item.unit || ''}`, colDelivX + 2, tableY + 5, { width: colDelivW - 6, align: 'right' });
+        .text(`${delivQty}`, colDelivX + 2, tableY + 5, { width: colDelivW - 6, align: 'right' });
 
       tableY += rowHeight;
     });
