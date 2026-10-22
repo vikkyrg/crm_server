@@ -18,9 +18,6 @@ const seedData = async () => {
     console.log('[Seed] Connected to database');
 
     // Clean current database
-    const Employee = require('../models/Employee');
-    const PayrollRun = require('../models/PayrollRun');
-    const EmployeePfRecord = require('../models/EmployeePfRecord');
     const DeliveryChallan = require('../models/DeliveryChallan');
 
     await Promise.all([
@@ -32,12 +29,9 @@ const seedData = async () => {
       Invoice.deleteMany(),
       AdvancePayment.deleteMany(),
       QuantityRecord.deleteMany(),
-      Employee.deleteMany(),
-      PayrollRun.deleteMany(),
-      EmployeePfRecord.deleteMany(),
       DeliveryChallan.deleteMany()
     ]);
-    console.log('[Seed] Cleared existing records');
+    console.log('[Seed] Cleared existing CRM records; preserved employees and payroll history');
 
     // 1. Company Settings
     const settings = await CompanySettings.create({
@@ -422,138 +416,6 @@ const seedData = async () => {
     });
     console.log('[Seed] Created Advance Payment');
 
-    // 9. Employees
-    const emp1 = await Employee.create({
-      employeeId: 'EMP-001',
-      firstName: 'Vikram',
-      lastName: 'Sharma',
-      fullName: 'Vikram Sharma',
-      email: 'vikram.sharma@innomatrics.com',
-      phone: '+91 98111 22233',
-      department: 'Engineering',
-      designation: 'Principal Solutions Architect',
-      joiningDate: new Date('2024-01-15'),
-      employmentStatus: 'Active',
-      employmentType: 'Full-time',
-      currentAddress: 'Sector 62, Noida, Uttar Pradesh',
-      permanentAddress: 'Dehradun, Uttarakhand',
-      emergencyContact: {
-        name: 'Sunita Sharma',
-        relationship: 'Spouse',
-        phone: '+91 98111 22299'
-      },
-      bankDetails: {
-        bankName: 'HDFC Bank',
-        accountNumber: '50100234567890',
-        ifscCode: 'HDFC0001890',
-        branch: 'Sector 62 Noida',
-        accountHolderName: 'Vikram Sharma'
-      },
-      statutoryInfo: {
-        panNumber: 'ABCPS1234F',
-        aadhaarNumber: '1234-5678-9012',
-        uan: '101234567890',
-        pfAccountNumber: 'UP/NOI/0012345/000/0000101',
-        isPfEligible: true,
-        pfWageLimitApplicable: false
-      },
-      salaryStructure: {
-        basicSalary: 65000,
-        hra: 26000,
-        conveyanceAllowance: 5000,
-        specialAllowance: 14000,
-        medicalAllowance: 5000,
-        grossSalary: 115000,
-        employeePfRate: 12,
-        employerPfRate: 12,
-        professionalTax: 200,
-        tdsEstimate: 8500
-      }
-    });
-
-    const emp2 = await Employee.create({
-      employeeId: 'EMP-002',
-      firstName: 'Pooja',
-      lastName: 'Agarwal',
-      fullName: 'Pooja Agarwal',
-      email: 'pooja.agarwal@innomatrics.com',
-      phone: '+91 98222 33344',
-      department: 'Finance',
-      designation: 'Finance & Compliance Manager',
-      joiningDate: new Date('2024-03-01'),
-      employmentStatus: 'Active',
-      employmentType: 'Full-time',
-      currentAddress: 'Indirapuram, Ghaziabad, UP',
-      bankDetails: {
-        bankName: 'ICICI Bank',
-        accountNumber: '002101567891',
-        ifscCode: 'ICIC0000021',
-        branch: 'Sector 18 Noida',
-        accountHolderName: 'Pooja Agarwal'
-      },
-      statutoryInfo: {
-        panNumber: 'BKLPA9876C',
-        uan: '109876543210',
-        pfAccountNumber: 'UP/NOI/0012345/000/0000102',
-        isPfEligible: true,
-        pfWageLimitApplicable: false
-      },
-      salaryStructure: {
-        basicSalary: 45000,
-        hra: 18000,
-        conveyanceAllowance: 3000,
-        specialAllowance: 10000,
-        medicalAllowance: 4000,
-        grossSalary: 80000,
-        employeePfRate: 12,
-        employerPfRate: 12,
-        professionalTax: 200,
-        tdsEstimate: 4200
-      }
-    });
-
-    const emp3 = await Employee.create({
-      employeeId: 'EMP-003',
-      firstName: 'Rahul',
-      lastName: 'Mehta',
-      fullName: 'Rahul Mehta',
-      email: 'rahul.mehta@innomatrics.com',
-      phone: '+91 97111 88990',
-      department: 'Logistics & Supply',
-      designation: 'Operations & Site Dispatch Officer',
-      joiningDate: new Date('2024-06-10'),
-      employmentStatus: 'Active',
-      employmentType: 'Full-time',
-      currentAddress: 'Greater Noida West, UP',
-      bankDetails: {
-        bankName: 'Axis Bank',
-        accountNumber: '918010045678912',
-        ifscCode: 'UTIB0000189',
-        branch: 'Knowledge Park Greater Noida',
-        accountHolderName: 'Rahul Mehta'
-      },
-      statutoryInfo: {
-        panNumber: 'CJQPM4567E',
-        uan: '104567890123',
-        pfAccountNumber: 'UP/NOI/0012345/000/0000103',
-        isPfEligible: true,
-        pfWageLimitApplicable: false
-      },
-      salaryStructure: {
-        basicSalary: 28000,
-        hra: 11200,
-        conveyanceAllowance: 2500,
-        specialAllowance: 5000,
-        medicalAllowance: 2300,
-        grossSalary: 49000,
-        employeePfRate: 12,
-        employerPfRate: 12,
-        professionalTax: 200,
-        tdsEstimate: 1200
-      }
-    });
-    console.log('[Seed] Created Employees');
-
     // 10. Delivery Challan
     const challan1 = await DeliveryChallan.create({
       challanNumber: 'DC-2026-00001',
@@ -684,115 +546,6 @@ const seedData = async () => {
     await challan1.save();
     console.log('[Seed] Created Material Invoice linked to Challan');
 
-    // 12. Payroll Run & Statutory PF Records
-    const payrollEmployees = [emp1, emp2, emp3];
-    const payrollItems = payrollEmployees.map(emp => {
-      const basic = emp.salaryStructure.basicSalary;
-      const gross = emp.salaryStructure.grossSalary;
-      const empPf = Math.round(basic * 0.12);
-      const emplyrPf = Math.round(basic * 0.12);
-      const pt = emp.salaryStructure.professionalTax;
-      const tds = emp.salaryStructure.tdsEstimate;
-      const totalDeductions = empPf + pt + tds;
-      const netPayable = gross - totalDeductions;
-
-      return {
-        employee: emp._id,
-        employeeId: emp.employeeId,
-        employeeName: emp.fullName,
-        department: emp.department,
-        designation: emp.designation,
-        panNumber: emp.statutoryInfo.panNumber,
-        bankAccount: emp.bankDetails.accountNumber,
-        bankName: emp.bankDetails.bankName,
-        ifscCode: emp.bankDetails.ifscCode,
-        uan: emp.statutoryInfo.uan,
-        pfAccountNumber: emp.statutoryInfo.pfAccountNumber,
-        totalWorkingDays: 30,
-        paidDays: 30,
-        basicSalary: basic,
-        hra: emp.salaryStructure.hra,
-        conveyanceAllowance: emp.salaryStructure.conveyanceAllowance,
-        specialAllowance: emp.salaryStructure.specialAllowance,
-        medicalAllowance: emp.salaryStructure.medicalAllowance,
-        otherAllowances: 0,
-        bonusOrIncentive: 0,
-        overtimeAmount: 0,
-        grossEarnings: gross,
-        pfWageBase: basic,
-        employeePfContribution: empPf,
-        professionalTax: pt,
-        tdsDeduction: tds,
-        otherDeductions: 0,
-        totalEmployeeDeductions: totalDeductions,
-        netSalaryPayable: netPayable,
-        employerPfContribution: emplyrPf,
-        employerCostTotal: gross + emplyrPf,
-        paymentStatus: 'Paid',
-        paymentDate: new Date('2026-10-02'),
-        paymentMethod: 'Bank Transfer',
-        paymentReference: `HDFC-SAL-2026-09-${emp.employeeId}`
-      };
-    });
-
-    const totalGross = payrollItems.reduce((acc, i) => acc + i.grossEarnings, 0);
-    const totalEmpPf = payrollItems.reduce((acc, i) => acc + i.employeePfContribution, 0);
-    const totalEmplyrPf = payrollItems.reduce((acc, i) => acc + i.employerPfContribution, 0);
-    const totalDeds = payrollItems.reduce((acc, i) => acc + i.totalEmployeeDeductions, 0);
-    const totalNet = payrollItems.reduce((acc, i) => acc + i.netSalaryPayable, 0);
-
-    const prevMonthRun = await PayrollRun.create({
-      payrollCode: 'PAY-2026-0001',
-      month: 9,
-      year: 2026,
-      periodName: 'September 2026',
-      items: payrollItems,
-      totalEmployees: 3,
-      totalGrossEarnings: totalGross,
-      totalEmployeePf: totalEmpPf,
-      totalEmployerPf: totalEmplyrPf,
-      totalPfContribution: totalEmpPf + totalEmplyrPf,
-      totalProfessionalTax: 600,
-      totalTdsDeductions: 13900,
-      totalDeductions: totalDeds,
-      totalNetPayable: totalNet,
-      totalEmployerCost: totalGross + totalEmplyrPf,
-      totalAmountPaid: totalNet,
-      totalPendingAmount: 0,
-      status: 'Finalized',
-      finalizedAt: new Date('2026-10-01'),
-      finalizedBy: adminUser._id,
-      remarks: 'September 2026 salaries disbursed on schedule',
-      createdBy: adminUser._id
-    });
-
-    // Statutory PF Records for September 2026
-    for (const itm of payrollItems) {
-      await EmployeePfRecord.create({
-        recordCode: `PF-2026-09-${itm.employeeId}`,
-        employee: itm.employee,
-        employeeId: itm.employeeId,
-        employeeName: itm.employeeName,
-        uan: itm.uan,
-        pfAccountNumber: itm.pfAccountNumber,
-        payrollRun: prevMonthRun._id,
-        month: 9,
-        year: 2026,
-        periodName: 'September 2026',
-        pfWageBase: itm.pfWageBase,
-        employeeContribution: itm.employeePfContribution,
-        employerContribution: itm.employerPfContribution,
-        totalPfAmount: itm.employeePfContribution + itm.employerPfContribution,
-        remittanceStatus: 'Remitted',
-        challanNumber: 'TRRN-881239045',
-        remittanceDate: new Date('2026-10-10'),
-        bankReference: 'HDFC-EPFO-991204',
-        remarks: 'EPFO September 2026 ECR remittance complete'
-      });
-    }
-
-    console.log('[Seed] Created September 2026 Finalized Payroll & EPFO Remittance Records');
-
     // 13. Synchronize Sequence Counters
     const { Counter } = require('../models/Counter');
     await Promise.all([
@@ -802,7 +555,6 @@ const seedData = async () => {
       Counter.findByIdAndUpdate('invoiceNumber', { seq: 3 }, { upsert: true }),
       Counter.findByIdAndUpdate('advanceReceiptNumber', { seq: 1 }, { upsert: true }),
       Counter.findByIdAndUpdate('quantityRecordId', { seq: 3 }, { upsert: true }),
-      Counter.findByIdAndUpdate('employeeId', { seq: 3 }, { upsert: true }),
       Counter.findByIdAndUpdate('deliveryChallanNumber', { seq: 1 }, { upsert: true })
     ]);
     console.log('[Seed] Synchronized all Sequence Counters');
