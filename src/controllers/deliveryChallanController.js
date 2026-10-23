@@ -372,151 +372,180 @@ exports.downloadChallanPDF = async (req, res, next) => {
 
     const companySettings = await CompanySettings.findOne() || {};
 
+    // Page Geometry: Standard A4 portrait (595.28 x 841.89 pt), Margins 40pt -> Content Width 515.28pt (515pt)
     const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${challan.challanNumber}.pdf"`);
     doc.pipe(res);
 
-    const primaryColor = '#1e40af';
-    const textColor = '#1f2937';
-    const mutedColor = '#64748b';
-    const borderColor = '#cbd5e1';
+    const primaryColor = '#1e40af'; // Blue 800
+    const primaryDark = '#1d4ed8';
+    const textColor = '#1e293b';   // Slate 800
+    const textSecondary = '#475569'; // Slate 600
+    const mutedColor = '#64748b';    // Slate 500
+    const borderColor = '#cbd5e1';   // Slate 300
+    const cardBgColor = '#f8fafc';   // Slate 50
 
-    // Page Geometry
     const leftMargin = 40;
-    const pageWidth = 515; // 595.28 - 2 * 40 = 515.28 pt
+    const pageWidth = 515;
+    const rightMargin = leftMargin + pageWidth; // 555
 
-    // Table Column Definitions
-    const colSrX = 40;
-    const colSrW = 28;
+    // Exact Table Column Layout: 30 + 265 + 80 + 70 + 70 = 515
+    const colSrX = leftMargin;       // 40
+    const colSrW = 30;
 
-    const colDescX = 68;
-    const colDescW = 237;
+    const colDescX = colSrX + colSrW; // 70
+    const colDescW = 265;
 
-    const colBatchX = 305;
+    const colBatchX = colDescX + colDescW; // 335
     const colBatchW = 80;
 
-    const colDispX = 385;
-    const colDispW = 65;
+    const colDispX = colBatchX + colBatchW; // 415
+    const colDispW = 70;
 
-    const colDelivX = 450;
-    const colDelivW = 65;
+    const colDelivX = colDispX + colDispW;  // 485
+    const colDelivW = 70;
 
     // Helper: Render Table Header
     const renderTableHeader = (headerY) => {
       doc.rect(leftMargin, headerY, pageWidth, 20).fill('#2563eb');
       doc.fillColor('#ffffff').fontSize(7.5).font('Helvetica-Bold');
 
-      doc.text('SR', colSrX + 4, headerY + 5, { width: colSrW - 8, align: 'center' });
-      doc.text('ITEM CODE & DESCRIPTION', colDescX + 4, headerY + 5, { width: colDescW - 8, align: 'left' });
-      doc.text('BATCH / S.NO', colBatchX + 4, headerY + 5, { width: colBatchW - 8, align: 'left' });
-      doc.text('DISPATCHED', colDispX + 4, headerY + 5, { width: colDispW - 8, align: 'right' });
-      doc.text('DELIVERED', colDelivX + 4, headerY + 5, { width: colDelivW - 8, align: 'right' });
+      doc.text('SR', colSrX, headerY + 6, { width: colSrW, align: 'center' });
+      doc.text('ITEM CODE & DESCRIPTION', colDescX + 6, headerY + 6, { width: colDescW - 12, align: 'left' });
+      doc.text('BATCH / S.NO', colBatchX, headerY + 6, { width: colBatchW, align: 'center' });
+      doc.text('DISPATCHED', colDispX, headerY + 6, { width: colDispW - 8, align: 'right' });
+      doc.text('DELIVERED', colDelivX, headerY + 6, { width: colDelivW - 8, align: 'right' });
 
-      // Outer border for header
-      doc.rect(leftMargin, headerY, pageWidth, 20).strokeColor('#1d4ed8').lineWidth(0.5).stroke();
-
+      doc.rect(leftMargin, headerY, pageWidth, 20).strokeColor(primaryDark).lineWidth(0.5).stroke();
       return headerY + 20;
     };
 
-    // Helper: Continuation Header for subsequent pages
+    // Helper: Continuation Header for multi-page overflow
     const renderContinuationHeader = (contY) => {
-      doc.fillColor(primaryColor).fontSize(10.5).font('Helvetica-Bold')
+      doc.fillColor(primaryColor).fontSize(11).font('Helvetica-Bold')
         .text('DELIVERY CHALLAN (CONTINUED)', leftMargin, contY);
       doc.font('Helvetica').fontSize(8).fillColor(textColor)
-        .text(`Challan No: ${challan.challanNumber}  |  Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, 300, contY, { align: 'right', width: 255 });
-      doc.moveTo(leftMargin, contY + 14).lineTo(leftMargin + pageWidth, contY + 14).strokeColor('#e2e8f0').lineWidth(1).stroke();
-      return contY + 20;
+        .text(`Challan No: ${challan.challanNumber}   |   Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, 300, contY + 2, { align: 'right', width: 255 });
+      doc.moveTo(leftMargin, contY + 16).lineTo(rightMargin, contY + 16).strokeColor('#e2e8f0').lineWidth(1).stroke();
+      return contY + 22;
     };
 
-    // --- PAGE 1 TOP HEADER ---
-    let headerStartY = 38;
+    // --- PAGE 1: HEADER SECTION ---
+    let headerStartY = 36;
     if (companySettings.companyLogo && companySettings.companyLogo.startsWith('data:image')) {
       try {
         const base64Data = companySettings.companyLogo.split(';base64,').pop();
         const imageBuffer = Buffer.from(base64Data, 'base64');
-        doc.image(imageBuffer, 40, 32, { height: 32 });
-        headerStartY = 68;
+        doc.image(imageBuffer, leftMargin, 34, { height: 32 });
+        headerStartY = 70;
       } catch (e) {
         console.error('Failed to render PDF logo:', e.message);
       }
     }
 
-    if (headerStartY === 38) {
-      doc.fillColor(primaryColor).fontSize(15).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
-      doc.fillColor('#4b5563').fontSize(7.5).text(companySettings.tagline || 'Engineering & Logistics Division', 40, headerStartY + 18);
-      doc.text(companySettings.address || '', 40, headerStartY + 28, { width: 280, lineBreak: false, ellipsis: true });
-      doc.text(`Phone: ${companySettings.phone || ''} | Email: ${companySettings.email || ''}`, 40, headerStartY + 38);
-      doc.text(`GSTIN: ${companySettings.gstin || 'N/A'}`, 40, headerStartY + 48);
-    } else {
-      doc.fillColor(primaryColor).fontSize(12).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
-      doc.fillColor('#4b5563').fontSize(7.5).text(`${companySettings.address || ''} | Phone: ${companySettings.phone || ''} | GSTIN: ${companySettings.gstin || 'N/A'}`, 40, headerStartY + 14, { width: 280 });
-    }
+    const companyDetailsX = leftMargin;
+    const companyDetailsW = 280;
+    let companyY = headerStartY;
 
-    // Document Title & Metadata
+    doc.fillColor(primaryColor).fontSize(13).font('Helvetica-Bold')
+      .text(companySettings.companyName || 'Navadurga Electricals', companyDetailsX, companyY, { width: companyDetailsW });
+    companyY += 16;
+
+    const companyMeta = [
+      companySettings.address,
+      companySettings.phone ? `Phone: ${companySettings.phone}` : null,
+      companySettings.email ? `Email: ${companySettings.email}` : null,
+      `GSTIN: ${companySettings.gstin || 'N/A'}`
+    ].filter(Boolean).join(' | ');
+
+    doc.font('Helvetica').fontSize(7.5).fillColor(textSecondary)
+      .text(companyMeta, companyDetailsX, companyY, { width: companyDetailsW, lineGap: 1.5 });
+    const companyMetaHeight = doc.heightOfString(companyMeta, { width: companyDetailsW, font: 'Helvetica', size: 7.5, lineGap: 1.5 });
+    const companyBottomY = companyY + companyMetaHeight;
+
+    // Right Header: Document Title & Metadata
     const metaX = 330;
     const metaW = 225;
-    doc.fillColor(primaryColor).fontSize(14).font('Helvetica-Bold').text('DELIVERY CHALLAN', metaX, 36, { align: 'right', width: metaW });
-    doc.fillColor(textColor).fontSize(8.5).font('Helvetica-Bold').text(`Challan No: ${challan.challanNumber}`, metaX, 54, { align: 'right', width: metaW });
-    doc.font('Helvetica').fontSize(8).text(`Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, metaX, 66, { align: 'right', width: metaW });
-    doc.text(`Status: ${challan.status || 'Issued'}`, metaX, 78, { align: 'right', width: metaW });
+    doc.fillColor(primaryColor).fontSize(15).font('Helvetica-Bold').text('DELIVERY CHALLAN', metaX, 34, { align: 'right', width: metaW });
+    
+    let metaY = 52;
+    doc.fillColor(textColor).fontSize(8.5).font('Helvetica-Bold').text(`Challan No: ${challan.challanNumber}`, metaX, metaY, { align: 'right', width: metaW });
+    metaY += 12;
+    doc.font('Helvetica').fontSize(8).fillColor(textSecondary).text(`Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN')}`, metaX, metaY, { align: 'right', width: metaW });
+    metaY += 12;
+    doc.text(`Status: ${challan.status || 'Issued'}`, metaX, metaY, { align: 'right', width: metaW });
+    metaY += 12;
 
-    const dividerY = 96;
-    doc.moveTo(leftMargin, dividerY).lineTo(leftMargin + pageWidth, dividerY).strokeColor('#e2e8f0').lineWidth(1).stroke();
+    // Divider cleanly beneath whichever header column extends further
+    const dividerY = Math.max(companyBottomY + 8, metaY + 4, 98);
+    doc.moveTo(leftMargin, dividerY).lineTo(rightMargin, dividerY).strokeColor('#e2e8f0').lineWidth(1).stroke();
 
-    // Client & Consignee Box
+    // --- CLIENT & DISPATCH INFORMATION PANELS ---
     const client = challan.clientSnapshot || {};
-    const boxW = 252;
-    const boxH = 56;
-    const boxY = 102;
+    const cardGap = 11;
+    const cardW = 252; // 252 + 11 + 252 = 515
+    const cardH = 68;  // Ample vertical space for 4 neat rows without overflow
+    const cardY = dividerY + 7;
 
-    doc.rect(leftMargin, boxY, boxW, boxH).fillAndStroke('#f8fafc', borderColor);
-    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('CONSIGNEE / CLIENT DETAILS', leftMargin + 8, boxY + 6);
+    // Left Panel: Consignee / Client Details
+    doc.rect(leftMargin, cardY, cardW, cardH).fillAndStroke(cardBgColor, borderColor);
+    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('CONSIGNEE / CLIENT DETAILS', leftMargin + 8, cardY + 6);
+    
     doc.font('Helvetica').fontSize(7.5).fillColor(textColor);
-    doc.text(`Company: ${client.companyName || 'N/A'}`, leftMargin + 8, boxY + 18, { width: boxW - 16, lineBreak: false, ellipsis: true });
-    doc.text(`Phone: ${client.primaryPhone || 'N/A'}`, leftMargin + 8, boxY + 30, { width: boxW - 16 });
-    doc.text(`Client GSTIN: ${client.gstin || 'Unregistered'}`, leftMargin + 8, boxY + 42, { width: boxW - 16 });
+    let leftLineY = cardY + 20;
+    const clientCompany = client.companyName || '-';
+    doc.text(`Company: ${clientCompany}`, leftMargin + 8, leftLineY, { width: cardW - 16, lineBreak: false, ellipsis: true });
+    leftLineY += 14;
+    doc.text(`Phone: ${client.primaryPhone || '-'}`, leftMargin + 8, leftLineY, { width: cardW - 16 });
+    leftLineY += 14;
+    doc.text(`Client GSTIN: ${client.gstin || '-'}`, leftMargin + 8, leftLineY, { width: cardW - 16 });
 
-    // Destination & Dispatch Box
-    const box2X = leftMargin + boxW + 11;
-    doc.rect(box2X, boxY, boxW, boxH).fillAndStroke('#f8fafc', borderColor);
-    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('DESTINATION & DISPATCH INFO', box2X + 8, boxY + 6);
+    // Right Panel: Destination & Dispatch Info
+    const rightCardX = leftMargin + cardW + cardGap; // 40 + 252 + 11 = 303
+    doc.rect(rightCardX, cardY, cardW, cardH).fillAndStroke(cardBgColor, borderColor);
+    doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold').text('DESTINATION & DISPATCH INFO', rightCardX + 8, cardY + 6);
+
+    let rightLineY = cardY + 18;
     doc.font('Helvetica').fontSize(7.5).fillColor(textColor);
-    doc.text(`Delivery Type: ${challan.deliveryType || 'Material Supply'}`, box2X + 8, boxY + 18, { width: boxW - 16, lineBreak: false, ellipsis: true });
-    doc.text(`Project/WO: ${challan.projectOrWorkOrder || 'N/A'}`, box2X + 8, boxY + 30, { width: boxW - 16, lineBreak: false, ellipsis: true });
-    doc.text(`Vehicle No: ${challan.vehicleNumber || 'N/A'}`, box2X + 8, boxY + 42, { width: boxW - 16 });
-    doc.text(`Transporter: ${challan.transporterName || 'Direct Delivery'}`, box2X + 8, boxY + 54, { width: boxW - 16, lineBreak: false, ellipsis: true });
+    doc.text(`Delivery Type: ${challan.deliveryType || 'Material Supply'}`, rightCardX + 8, rightLineY, { width: cardW - 16, lineBreak: false, ellipsis: true });
+    rightLineY += 12;
+    doc.text(`Project/WO: ${challan.projectOrWorkOrder || '-'}`, rightCardX + 8, rightLineY, { width: cardW - 16, lineBreak: false, ellipsis: true });
+    rightLineY += 12;
+    doc.text(`Vehicle No: ${challan.vehicleNumber || '-'}`, rightCardX + 8, rightLineY, { width: cardW - 16 });
+    rightLineY += 12;
+    doc.text(`Transporter: ${challan.transporterName || '-'}`, rightCardX + 8, rightLineY, { width: cardW - 16, lineBreak: false, ellipsis: true });
 
-    // Delivery Address Card (dynamic height)
-    doc.font('Helvetica').fontSize(7.5);
-    const addrContent = (challan.deliveryAddress || client.shippingAddress || client.billingAddress || 'Project Destination').trim();
+    // Delivery Site Address (Full Width Row)
+    const rawAddr = (challan.deliveryAddress || client.shippingAddress || client.billingAddress || '-').trim();
+    const addrContent = rawAddr || '-';
     const addrTextW = 380;
-    const addrTextHeight = doc.heightOfString(addrContent, { width: addrTextW });
+    doc.font('Helvetica').fontSize(7.5);
+    const addrTextHeight = doc.heightOfString(addrContent, { width: addrTextW, lineGap: 1 });
     const addrCardH = Math.max(20, addrTextHeight + 8);
-    const addrCardY = boxY + boxH + 6;
+    const addrCardY = cardY + cardH + 5;
 
     doc.rect(leftMargin, addrCardY, pageWidth, addrCardH).fillAndStroke('#eff6ff', '#bfdbfe');
     doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('DELIVERY SITE ADDRESS:', leftMargin + 8, addrCardY + 5);
-    doc.font('Helvetica').fillColor(textColor).text(addrContent, leftMargin + 125, addrCardY + 5, { width: addrTextW });
+    doc.font('Helvetica').fillColor(textColor).text(addrContent, leftMargin + 124, addrCardY + 5, { width: addrTextW, lineGap: 1 });
 
     // --- ITEM TABLE ---
-    let tableY = addrCardY + addrCardH + 8;
+    let tableY = addrCardY + addrCardH + 7;
     tableY = renderTableHeader(tableY);
 
-    // Render items with dynamic row heights and automatic page wrapping
     (challan.items || []).forEach((item, index) => {
-      // Calculate height needed for this row
       doc.font('Helvetica').fontSize(7.5);
-      const descHeight = doc.heightOfString(item.description || '', { width: colDescW - 8 });
-      const codeHeight = item.itemCode ? 9 : 0;
-      const notesHeight = item.notes ? doc.heightOfString(`Note: ${item.notes}`, { width: colDescW - 8 }) + 2 : 0;
+      const descText = item.description || 'Material Item';
+      const descHeight = doc.heightOfString(descText, { width: colDescW - 12 });
+      const codeHeight = item.itemCode ? 10 : 0;
+      const notesHeight = item.notes ? doc.heightOfString(`Note: ${item.notes}`, { width: colDescW - 12 }) + 2 : 0;
       const contentHeight = descHeight + codeHeight + notesHeight;
-      const rowHeight = Math.max(20, contentHeight + 8);
+      const rowHeight = Math.max(22, contentHeight + 8);
 
-      // Check if row exceeds printable page area (max tableY ~ 700)
+      // Multi-page overflow check (Standard A4 is 841.89pt, 710 max allows footer space on page 1)
       if (tableY + rowHeight > 700) {
         doc.addPage();
-        let contY = 38;
+        let contY = 36;
         contY = renderContinuationHeader(contY);
         tableY = renderTableHeader(contY);
       }
@@ -524,78 +553,87 @@ exports.downloadChallanPDF = async (req, res, next) => {
       const rowBg = index % 2 === 0 ? '#ffffff' : '#f8fafc';
       doc.rect(leftMargin, tableY, pageWidth, rowHeight).fillAndStroke(rowBg, '#e2e8f0');
 
-      // SR
+      // SR (Centered)
       doc.fillColor(mutedColor).fontSize(7.5).font('Helvetica')
-        .text(`${index + 1}`, colSrX + 2, tableY + 5, { width: colSrW - 4, align: 'center' });
+        .text(`${index + 1}`, colSrX, tableY + 6, { width: colSrW, align: 'center' });
 
-      // Description & Code
+      // Item Code & Description (Left aligned with padding)
       let descY = tableY + 5;
       doc.fillColor(textColor).fontSize(7.5).font('Helvetica-Bold')
-        .text(item.description || 'Material Item', colDescX + 4, descY, { width: colDescW - 8 });
+        .text(descText, colDescX + 6, descY, { width: colDescW - 12 });
       descY += descHeight;
 
       if (item.itemCode) {
         doc.fillColor(mutedColor).fontSize(6.5).font('Helvetica')
-          .text(`Code: ${item.itemCode}`, colDescX + 4, descY, { width: colDescW - 8 });
+          .text(`Code: ${item.itemCode}`, colDescX + 6, descY, { width: colDescW - 12 });
         descY += 9;
       }
       if (item.notes) {
         doc.fillColor('#475569').fontSize(6.5).font('Helvetica-Oblique')
-          .text(`Note: ${item.notes}`, colDescX + 4, descY, { width: colDescW - 8 });
+          .text(`Note: ${item.notes}`, colDescX + 6, descY, { width: colDescW - 12 });
       }
 
-      // Batch / Serial No
+      // Batch / Serial No. (Centered)
       doc.fillColor(textColor).fontSize(7.5).font('Helvetica')
-        .text(item.batchOrSerialNo || '-', colBatchX + 4, tableY + 5, { width: colBatchW - 8, align: 'left', lineBreak: false, ellipsis: true });
+        .text(item.batchOrSerialNo || '-', colBatchX, tableY + 6, { width: colBatchW, align: 'center', lineBreak: false, ellipsis: true });
 
-      // Dispatched Qty
+      // Dispatched Qty (Right aligned)
       doc.fillColor(textColor).fontSize(7.5).font('Helvetica-Bold')
-        .text(`${item.quantityDispatched}`, colDispX + 2, tableY + 5, { width: colDispW - 6, align: 'right' });
+        .text(`${item.quantityDispatched}`, colDispX, tableY + 6, { width: colDispW - 8, align: 'right' });
 
-      // Delivered Qty
+      // Delivered Qty (Right aligned)
       const delivQty = item.quantityDelivered !== undefined && item.quantityDelivered !== null ? item.quantityDelivered : 0;
       doc.fillColor(delivQty > 0 ? '#15803d' : mutedColor).fontSize(7.5).font('Helvetica-Bold')
-        .text(`${delivQty}`, colDelivX + 2, tableY + 5, { width: colDelivW - 6, align: 'right' });
+        .text(`${delivQty}`, colDelivX, tableY + 6, { width: colDelivW - 8, align: 'right' });
 
       tableY += rowHeight;
     });
 
-    // Check if footer (Terms + Signatures ~ 85pt) fits on current page
-    const footerNeededHeight = 85;
-    if (tableY + footerNeededHeight > 750) {
+    // Check if Terms & Signature blocks (~90pt) fit on current page
+    const footerNeededHeight = 90;
+    if (tableY + footerNeededHeight > 745) {
       doc.addPage();
-      let contY = 38;
+      let contY = 36;
       contY = renderContinuationHeader(contY);
       tableY = contY + 8;
     } else {
       tableY += 8;
     }
 
-    // Terms & Conditions Card
+    // --- COMPACT TERMS & CONDITIONS ---
     const termsY = tableY;
-    const termsH = 34;
-    doc.rect(leftMargin, termsY, pageWidth, termsH).fillAndStroke('#f8fafc', borderColor);
+    const termsText = challan.termsAndConditions || 'Goods once dispatched are subject to physical inspection at destination. Claims regarding transit discrepancy or damage must be notified within 48 hours.';
+    doc.font('Helvetica').fontSize(7);
+    const termsTextHeight = doc.heightOfString(termsText, { width: pageWidth - 16, lineGap: 1.5 });
+    const termsH = Math.max(30, termsTextHeight + 16);
+
+    doc.rect(leftMargin, termsY, pageWidth, termsH).fillAndStroke(cardBgColor, borderColor);
     doc.fillColor(primaryColor).fontSize(7).font('Helvetica-Bold').text('TERMS & DELIVERY CONDITIONS:', leftMargin + 8, termsY + 5);
-    doc.font('Helvetica').fontSize(7).fillColor('#475569')
-      .text(challan.termsAndConditions || 'Materials received in good condition. Claims regarding discrepancy or transit damage must be notified within 48 hours.', leftMargin + 8, termsY + 16, { width: pageWidth - 16 });
+    doc.font('Helvetica').fontSize(7).fillColor(textSecondary)
+      .text(termsText, leftMargin + 8, termsY + 15, { width: pageWidth - 16, lineGap: 1.5 });
 
-    // Signatures Block
-    const sigY = termsY + termsH + 26;
-    doc.moveTo(leftMargin, sigY).lineTo(leftMargin + 160, sigY).strokeColor('#94a3b8').lineWidth(0.8).stroke();
-    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#475569').text('Authorized Dispatch Signatory', leftMargin, sigY + 4);
-    doc.fontSize(7).font('Helvetica').fillColor(mutedColor).text(`For ${companySettings.companyName || 'Navadurga Electricals'}`, leftMargin, sigY + 14);
+    // --- SIGNATURES BLOCK ---
+    // Balanced, equal-width (160pt) signature lines aligned with leftMargin (40) and rightMargin (555)
+    const sigLineWidth = 160;
+    const sigY = termsY + termsH + 28;
 
-    const sig2X = leftMargin + pageWidth - 160;
-    doc.moveTo(sig2X, sigY).lineTo(leftMargin + pageWidth, sigY).strokeColor('#94a3b8').lineWidth(0.8).stroke();
-    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#475569').text('Receiver Signature & Site Stamp', sig2X, sigY + 4, { align: 'right', width: 160 });
-    doc.fontSize(7).font('Helvetica').fillColor(mutedColor).text('Received in good order & condition', sig2X, sigY + 14, { align: 'right', width: 160 });
+    // Authorized Dispatch Signatory (Left)
+    doc.moveTo(leftMargin, sigY).lineTo(leftMargin + sigLineWidth, sigY).strokeColor('#94a3b8').lineWidth(0.8).stroke();
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor(textSecondary).text('Authorized Dispatch Signatory', leftMargin, sigY + 4, { width: sigLineWidth });
+    doc.fontSize(7).font('Helvetica').fillColor(mutedColor).text(`For ${companySettings.companyName || 'Navadurga Electricals'}`, leftMargin, sigY + 14, { width: sigLineWidth });
 
-    // Page Numbering Footer on all pages (placed safely at Y=780 within bottom margin boundary)
+    // Receiver Signature & Site Stamp (Right)
+    const sig2X = rightMargin - sigLineWidth; // 555 - 160 = 395
+    doc.moveTo(sig2X, sigY).lineTo(rightMargin, sigY).strokeColor('#94a3b8').lineWidth(0.8).stroke();
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor(textSecondary).text('Receiver Signature & Site Stamp', sig2X, sigY + 4, { align: 'right', width: sigLineWidth });
+    doc.fontSize(7).font('Helvetica').fillColor(mutedColor).text('Received in good order & condition', sig2X, sigY + 14, { align: 'right', width: sigLineWidth });
+
+    // Page Numbering Footer on all pages
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
       doc.fontSize(7).font('Helvetica').fillColor('#94a3b8')
-        .text(`Delivery Challan ${challan.challanNumber}  |  Page ${i + 1} of ${range.count}`, leftMargin, 782, { align: 'center', width: pageWidth, lineBreak: false });
+        .text(`Delivery Challan ${challan.challanNumber}   |   Page ${i + 1} of ${range.count}`, leftMargin, 782, { align: 'center', width: pageWidth, lineBreak: false });
     }
 
     doc.end();

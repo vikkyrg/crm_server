@@ -200,6 +200,13 @@ test('Employee Salary / Payslip Workflow API Suite', async (t) => {
     assert.ok(res.body.length > 500);
 
     const pdf = res.body.toString('latin1');
+    const pageBoxes = [...pdf.matchAll(/\/MediaBox\s*\[([^\]]+)\]/g)]
+      .map((match) => match[1].trim().split(/\s+/).map(Number));
+    assert.ok(pageBoxes.length > 0, 'Payslip PDF should contain pages');
+    pageBoxes.forEach((pageBox) => {
+      assert.deepEqual(pageBox, [0, 0, 595.28, 841.89], 'Payslip pages must use A4 dimensions');
+    });
+
     const content = [...pdf.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
       .map((match) => {
         try {
@@ -222,5 +229,21 @@ test('Employee Salary / Payslip Workflow API Suite', async (t) => {
     const wordsPosition = pdfText.indexOf('In Words:', amountPosition);
     assert.ok(labelPosition >= 0 && amountPosition > labelPosition && wordsPosition > amountPosition);
     assert.ok(!pdfText.includes('(In Words:'));
+  });
+
+  await t.test('8. Download payslip PDF with uploaded company logo', async () => {
+    const testLogo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jx3sAAAAASUVORK5CYII=';
+    await CompanySettings.findOneAndUpdate({}, { companyLogo: testLogo }, { upsert: true });
+
+    const res = await request(app)
+      .get(`/api/payroll/payslip-pdf?employeeId=${testEmployee.employeeId}&month=10&year=2026`)
+      .set('Authorization', `Bearer ${token}`);
+
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['content-type'], 'application/pdf');
+    assert.ok(res.body.length > 500);
+
+    const pdf = res.body.toString('latin1');
+    assert.ok(pdf.includes('/XObject') || pdf.includes('/Image'), 'Payslip PDF should embed logo image XObject');
   });
 });

@@ -1187,44 +1187,64 @@ exports.downloadPayslipPDFDirect = async (req, res, next) => {
     const primaryColor = '#1e40af';
     const textColor = '#1f2937';
 
-    // Header
-    doc.fillColor(primaryColor).fontSize(18).text(companySettings.companyName || 'Navadurga Electricals', 40, 40, { bold: true });
-    doc.fillColor('#4b5563').fontSize(8.5).text(companySettings.tagline || 'Enterprise Cloud & Engineering Solutions', 40, 62);
-    doc.text(`${companySettings.address || ''} | Email: ${companySettings.email || ''}`, 40, 74);
+    // Company Header with Logo if available
+    let headerStartY = 40;
+    if (companySettings.companyLogo && companySettings.companyLogo.startsWith('data:image')) {
+      try {
+        const base64Data = companySettings.companyLogo.split(';base64,').pop();
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        doc.image(imageBuffer, 40, 35, { height: 35 });
+        headerStartY = 75;
+      } catch (e) {
+        console.error('Failed to render PDF logo:', e.message);
+      }
+    }
+
+    if (headerStartY === 40) {
+      doc.fillColor(primaryColor).fontSize(18).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
+      doc.fillColor('#4b5563').fontSize(8.5).text(companySettings.tagline || 'Enterprise Cloud & Engineering Solutions', 40, headerStartY + 22);
+      doc.text(`${companySettings.address || ''} | Email: ${companySettings.email || ''}`, 40, headerStartY + 34);
+    } else {
+      doc.fillColor(primaryColor).fontSize(14).text(companySettings.companyName || 'Navadurga Electricals', 40, headerStartY, { bold: true });
+      doc.fillColor('#4b5563').fontSize(8.5).text(companySettings.tagline || 'Enterprise Cloud & Engineering Solutions', 40, headerStartY + 18);
+      doc.text(`${companySettings.address || ''} | Email: ${companySettings.email || ''}`, 40, headerStartY + 30);
+    }
 
     doc.fillColor(primaryColor).fontSize(14).text('SALARY PAYSLIP', 380, 40, { align: 'right', bold: true });
     doc.fillColor(textColor).fontSize(9.5).text(`Pay Period: ${run.periodName}`, 380, 58, { align: 'right' });
     doc.text(`Payroll Ref: ${run.payrollCode}`, 380, 72, { align: 'right' });
     doc.text(`Disbursement: ${item.paymentStatus || 'Pending'}`, 380, 86, { align: 'right' });
 
-    doc.moveTo(40, 105).lineTo(555, 105).strokeColor('#e2e8f0').lineWidth(1).stroke();
+    const dividerY = headerStartY === 40 ? 105 : 120;
+    doc.moveTo(40, dividerY).lineTo(555, dividerY).strokeColor('#e2e8f0').lineWidth(1).stroke();
 
     // Employee Meta Grid Card
-    doc.rect(40, 115, 515, 75).fillAndStroke('#f8fafc', '#cbd5e1');
-    doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('EMPLOYEE CREDENTIALS & WORK RECORD', 48, 122);
+    const metaCardY = dividerY + 10;
+    doc.rect(40, metaCardY, 515, 75).fillAndStroke('#f8fafc', '#cbd5e1');
+    doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('EMPLOYEE CREDENTIALS & WORK RECORD', 48, metaCardY + 7);
     
     // Mask bank account for privacy
     const rawAcc = String(item.bankAccount || '');
     const maskedAcc = rawAcc.length > 4 ? `•••• •••• ${rawAcc.slice(-4)}` : (rawAcc || 'On File');
 
     doc.font('Helvetica').fontSize(8).fillColor(textColor);
-    doc.text(`Employee ID: ${item.employeeId}`, 48, 138);
-    doc.text(`Full Name: ${item.employeeName}`, 48, 150);
-    doc.text(`Department: ${item.department || 'Engineering'}`, 48, 162);
-    doc.text(`Designation: ${item.designation || 'Specialist'}`, 48, 174);
+    doc.text(`Employee ID: ${item.employeeId}`, 48, metaCardY + 23);
+    doc.text(`Full Name: ${item.employeeName}`, 48, metaCardY + 35);
+    doc.text(`Department: ${item.department || 'Engineering'}`, 48, metaCardY + 47);
+    doc.text(`Designation: ${item.designation || 'Specialist'}`, 48, metaCardY + 59);
 
-    doc.text(`Bank A/C: ${maskedAcc}`, 230, 138);
-    doc.text(`Bank Name: ${item.bankName || 'HDFC Bank'}`, 230, 150);
-    doc.text(`IFSC Code: ${item.ifscCode || 'N/A'}`, 230, 162);
-    doc.text(`PAN Number: ${item.panNumber || 'N/A'}`, 230, 174);
+    doc.text(`Bank A/C: ${maskedAcc}`, 230, metaCardY + 23);
+    doc.text(`Bank Name: ${item.bankName || 'HDFC Bank'}`, 230, metaCardY + 35);
+    doc.text(`IFSC Code: ${item.ifscCode || 'N/A'}`, 230, metaCardY + 47);
+    doc.text(`PAN Number: ${item.panNumber || 'N/A'}`, 230, metaCardY + 59);
 
-    doc.text(`Working Days: ${item.totalWorkingDays}`, 410, 138);
-    doc.text(`Paid Days: ${item.paidDays}`, 410, 150);
-    doc.text(`UAN: ${item.uan || 'N/A'}`, 410, 162);
-    doc.text(`PF Number: ${item.pfAccountNumber || 'N/A'}`, 410, 174);
+    doc.text(`Working Days: ${item.totalWorkingDays}`, 410, metaCardY + 23);
+    doc.text(`Paid Days: ${item.paidDays}`, 410, metaCardY + 35);
+    doc.text(`UAN: ${item.uan || 'N/A'}`, 410, metaCardY + 47);
+    doc.text(`PF Number: ${item.pfAccountNumber || 'N/A'}`, 410, metaCardY + 59);
 
     // Earnings & Deductions Dual Table
-    let tableY = 205;
+    let tableY = metaCardY + 90;
     const colWidth = 250;
 
     // Table Headers

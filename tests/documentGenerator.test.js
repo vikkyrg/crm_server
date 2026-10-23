@@ -73,6 +73,13 @@ test('invoice and PF PDFs show concise item columns and separate tax totals', as
     const { pdf, text } = await getPdfText(docType);
 
     assert.ok(pdf.startsWith('%PDF-'));
+    const pageBoxes = [...pdf.matchAll(/\/MediaBox\s*\[([^\]]+)\]/g)]
+      .map((match) => match[1].trim().split(/\s+/).map(Number));
+    assert.ok(pageBoxes.length > 0, `${docType} PDF should contain pages`);
+    pageBoxes.forEach((pageBox) => {
+      assert.deepEqual(pageBox, [0, 0, 595.28, 841.89], `${docType} pages must use A4 dimensions`);
+    });
+
     const itemHeaders = ['SR', 'SERVICE / ITEM', 'PRICE', 'QTY', 'TOTAL'];
     const headerPositions = itemHeaders.map((header) => text.indexOf(header));
     assert.ok(headerPositions.every((position) => position >= 0), `${docType} PDF is missing an item header`);

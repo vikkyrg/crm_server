@@ -252,6 +252,13 @@ describe('Delivery Challan Creation & Validation Suite', () => {
     assert.ok(pdfBuffer.length > 500, 'PDF buffer should be non-empty and greater than 500 bytes');
     assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF', 'PDF buffer must start with %PDF magic number');
     const pdfContent = pdfBuffer.toString('latin1');
+    const pageBoxes = [...pdfContent.matchAll(/\/MediaBox\s*\[([^\]]+)\]/g)]
+      .map((match) => match[1].trim().split(/\s+/).map(Number));
+    assert.ok(pageBoxes.length > 0, 'Delivery Challan PDF should contain pages');
+    pageBoxes.forEach((pageBox) => {
+      assert.deepEqual(pageBox, [0, 0, 595.28, 841.89], 'Delivery Challan pages must use A4 dimensions');
+    });
+
     const decodedStreams = [...pdfContent.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
       .map((match) => {
         try {
@@ -322,7 +329,15 @@ describe('Delivery Challan Creation & Validation Suite', () => {
     assert.ok(pdfBuffer.length > 2000, 'Multi-page PDF should be substantial in size');
     assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
 
-    const multiPageMatches = pdfBuffer.toString().match(/\/Type\s*\/Page[^s]/g);
+    const multiPagePdf = pdfBuffer.toString('latin1');
+    const pageBoxes = [...multiPagePdf.matchAll(/\/MediaBox\s*\[([^\]]+)\]/g)]
+      .map((match) => match[1].trim().split(/\s+/).map(Number));
+    assert.ok(pageBoxes.length > 1, 'Multi-row challan should have multiple pages');
+    pageBoxes.forEach((pageBox) => {
+      assert.deepEqual(pageBox, [0, 0, 595.28, 841.89], 'Every Delivery Challan page must use A4 dimensions');
+    });
+
+    const multiPageMatches = multiPagePdf.match(/\/Type\s*\/Page[^s]/g);
     assert.ok((multiPageMatches?.length || 0) > 1, 'Multi-row challan should span cleanly across multiple pages');
   });
 });

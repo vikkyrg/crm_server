@@ -254,8 +254,67 @@ const generateDocumentPDF = (docData, docType = 'INVOICE', companySettings, res)
       .strokeColor('#cbd5e1').lineWidth(0.6).stroke();
   }
 
+  // --- NOTES / REMARKS & TERMS AND CONDITIONS ---
+  // Safely retrieve notes and terms from docData
+  const notesText = (docData.notes || '').trim();
+  const termsText = (docData.termsAndConditions || docData.paymentTerms || '').trim();
+
+  // Determine starting Y after the financial summary and bank details
+  const amountWordsHeight = doc.heightOfString(words, { width: 300, font: 'Helvetica', size: 8 });
+  const bankSectionTotalH = bankDetails.length > 0 ? (17 + bankDetails.length * 17) : 0;
+  const leftColBottom = tableY + 12 + amountWordsHeight + 8 + bankSectionTotalH;
+  const rightColBottom = summaryY + (isInvoice ? 0 : 4);
+  let notesTermsStartY = Math.max(leftColBottom, rightColBottom) + 12;
+
+  const boxPadding = 6;
+  const innerTextWidth = contentWidth - boxPadding * 2;
+
+  // Helper to render a formatted card for Notes or Terms with automatic pagination
+  const renderInfoCard = (title, text) => {
+    if (!text) return;
+
+    doc.font('Helvetica').fontSize(7.5);
+    const textHeight = doc.heightOfString(text, { width: innerTextWidth, lineGap: 1.5 });
+    const headerH = 14;
+    const cardHeight = headerH + textHeight + boxPadding * 2;
+
+    // Check if card exceeds available page height before signature (signature at ~730, footer margin ~710)
+    if (notesTermsStartY + cardHeight > 700) {
+      doc.addPage();
+      notesTermsStartY = 40;
+    }
+
+    // Card background and border
+    doc.rect(40, notesTermsStartY, contentWidth, cardHeight).fillAndStroke('#f8fafc', '#cbd5e1');
+
+    // Section title
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(primaryColor)
+      .text(title, 40 + boxPadding, notesTermsStartY + 5);
+
+    // Section text content
+    doc.font('Helvetica').fontSize(7.5).fillColor(textColor)
+      .text(text, 40 + boxPadding, notesTermsStartY + headerH + 3, { width: innerTextWidth, lineGap: 1.5 });
+
+    notesTermsStartY += cardHeight + 8;
+  };
+
+  if (notesText) {
+    renderInfoCard('NOTES / REMARKS:', notesText);
+  }
+
+  if (termsText) {
+    renderInfoCard('TERMS & CONDITIONS:', termsText);
+  }
+
   // Footer / Signature
-  const footerY = 730;
+  let footerY = 730;
+  if (notesTermsStartY > 710) {
+    doc.addPage();
+    footerY = 730;
+  } else if (notesTermsStartY > footerY - 50) {
+    footerY = Math.min(780, notesTermsStartY + 25);
+  }
+
   doc.moveTo(380, footerY).lineTo(540, footerY).strokeColor('#9ca3af').stroke();
   doc.fontSize(8).fillColor('#4b5563').text(`For ${companySettings.companyName || 'Navadurga Electricals'}`, 380, footerY + 5, { align: 'center', width: 160 });
   doc.text('Authorized Signatory', 380, footerY + 18, { align: 'center', width: 160 });
@@ -364,6 +423,24 @@ const generateDocumentDocx = async (docData, docType = 'INVOICE', companySetting
               new TextRun({ text: `UPI ID: ${companySettings.upiId || 'N/A'}\n` })
             ]
           }),
+          ...(docData.notes ? [
+            new Paragraph({ text: '\n' }),
+            new Paragraph({
+              children: [
+                new TextRun({ text: 'Notes / Remarks:\n', bold: true, color: '1E40AF' }),
+                new TextRun({ text: `${docData.notes}\n` })
+              ]
+            })
+          ] : []),
+          ...((docData.termsAndConditions || docData.paymentTerms) ? [
+            new Paragraph({ text: '\n' }),
+            new Paragraph({
+              children: [
+                new TextRun({ text: 'Terms & Conditions:\n', bold: true, color: '1E40AF' }),
+                new TextRun({ text: `${docData.termsAndConditions || docData.paymentTerms}\n` })
+              ]
+            })
+          ] : []),
           new Paragraph({ text: '\n\n' }),
           new Paragraph({
             alignment: AlignmentType.RIGHT,
